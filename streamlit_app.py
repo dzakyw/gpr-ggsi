@@ -391,7 +391,8 @@ if st.session_state.data_loaded:
                     "System": st.session_state.header.get('system', 'Unknown'),
                     "Antenna Frequency": f"{st.session_state.header.get('ant_freq', 'N/A')} MHz",
                     "Samples per Trace": st.session_state.header.get('spt', 'N/A'),
-                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A')
+                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A'),
+                    "Sampling Depth": f"{st.session_state.header.get('depth', 'N/A'):.2f} m"
                 }
                 
                 for key, value in info_data.items():
