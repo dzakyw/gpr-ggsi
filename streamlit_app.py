@@ -146,7 +146,7 @@ if 'header' in st.session_state and st.session_state.header:
         
         with col2:
             st.metric("Bits per Sample", st.session_state.header.get('bps', 'N/A'))
-            st.metric("Sampling Depth", f"{st.session_state.header.get('depth', 'N/A'):.2f} m")
+            #st.metric("Sampling Depth", f"{st.session_state.header.get('depth', 'N/A'):.2f} m")
             st.metric("Dielectric Constant", st.session_state.header.get('epsr', 'N/A'))
             st.metric("Traces per Second", st.session_state.header.get('tps', 'N/A'))
         
@@ -211,3 +211,4 @@ elif not dzt_file:
 # Footer
 st.markdown("---")
 st.markdown("**GSSI Radar Data Processor** | Built with Streamlit & readgssi")
+
