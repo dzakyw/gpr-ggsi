@@ -298,7 +298,8 @@ if st.session_state.data_loaded:
             
             with col2:
                 st.metric("Traces", st.session_state.header.get('ntraces', 'N/A'))
-                st.metric("Bits per Sample", st.session_state.header.get('bps', 'N/A')
+                st.metric("Bits per Sample", st.session_state.header.get('bps', 'N/A'))
+                
             
             with col3:
                 st.metric("Dielectric Constant", st.session_state.header.get('epsr', 'N/A'))
@@ -544,4 +545,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
