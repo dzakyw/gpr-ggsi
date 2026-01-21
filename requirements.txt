@@ -1,0 +1,6 @@
+streamlit
+readgssi
+obspy
+pandas
+h5py
+pytz
