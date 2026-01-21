@@ -1,6 +1,4 @@
 # app.py - Main Streamlit Application
-
-import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -978,4 +976,5 @@ else:
     - High-resolution export
     - Multiple colormap options
     """)
+
 
