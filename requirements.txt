@@ -1,6 +1,12 @@
-streamlit
-readgssi
-obspy
-pandas
-h5py
-pytz
+# requirements.txt
+streamlit==1.28.0
+obspy==1.4.0
+numpy==1.24.0
+scipy==1.10.0
+matplotlib==3.7.0
+pandas==2.0.0
+h5py==3.8.0
+geopy==2.3.0
+pytz==2023.3
+readgssi==0.0.12
+plotly==5.17.0
