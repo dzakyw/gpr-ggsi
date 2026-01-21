@@ -1,3 +1,4 @@
+streamlit
 obspy==1.4.0
 numpy==1.24.0
 scipy==1.10.0
@@ -8,4 +9,5 @@ geopy==2.3.0
 pytz==2023.3
 readgssi==0.0.12
 plotly==5.17.0
+
 
