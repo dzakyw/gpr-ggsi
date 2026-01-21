@@ -57,152 +57,158 @@ if uploaded_file is not None:
                 """)
 
         with col2:
-            st.header("Radargram Plot")
-            # Create a form for plot parameters
-            with st.form("plot_form"):
-                st.subheader("Plot Settings")
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    gain = st.slider("Gain", 0.1, 5.0, 1.0, 0.1)
+            st.header("Data Processing & Radargram")
+            
+            # Create an expandable section for processing controls
+            with st.expander("🛠️ Processing Filters", expanded=True):
+                st.subheader("Noise Reduction & Enhancement")
+                
+                # Filter controls organized in columns
+                col_f1, col_f2 = st.columns(2)
+                
+                with col_f1:
+                    # Horizontal Filter (BGR)
+                    bgr_type = st.selectbox(
+                        "Horizontal Filter (BGR)",
+                        ["None", "Full-width average", "Moving window"],
+                        help="Removes horizontal banding noise. 'Moving window' requires a window size."
+                    )
+                    bgr_value = 0
+                    if bgr_type == "Moving window":
+                        bgr_value = st.slider("Window size (traces)", 10, 500, 100, 10)
+                    elif bgr_type == "Full-width average":
+                        bgr_value = 0  # readgssi uses 0 for full-width
+                    
+                    # Stacking
+                    stack_method = st.selectbox(
+                        "Stacking",
+                        ["None", "Auto (2.5:1 ratio)", "Manual"],
+                        help="Adds neighboring traces to reduce noise and condense the X-axis"
+                    )
+                    stack_value = None
+                    if stack_method == "Manual":
+                        stack_value = st.slider("Stacking factor", 2, 20, 3, 1)
+                    elif stack_method == "Auto (2.5:1 ratio)":
+                        stack_value = 'auto'
+                
+                with col_f2:
+                    # Frequency Filter
+                    use_freq_filter = st.checkbox("Apply Frequency Bandpass Filter", value=False)
+                    freq_min = 0
+                    freq_max = 0
+                    if use_freq_filter:
+                        # Get antenna frequency for sensible defaults
+                        ant_freq = hdr.get('antfreq', [100])[0]
+                        default_min = max(10, int(ant_freq * 0.6))
+                        default_max = int(ant_freq * 1.3)
+                        
+                        freq_min = st.slider("Minimum frequency (MHz)", 10, 500, default_min, 10)
+                        freq_max = st.slider("Maximum frequency (MHz)", freq_min+10, 1000, default_max, 10)
+                    
+                    # Line Reversal
+                    reverse_line = st.checkbox(
+                        "Reverse survey direction",
+                        value=False,
+                        help="Flip the array to show comparison with opposite direction lines"
+                    )
+                    
+                    # Gain is always available
+                    gain = st.slider("Amplitude Gain", 0.1, 100.0, 30.0, 0.1)
+            
+            # Display settings section
+            with st.expander("📐 Display Settings", expanded=True):
+                col_d1, col_d2 = st.columns(2)
+                with col_d1:
                     colormap = st.selectbox("Colormap", ["gray", "seismic", "RdBu", "viridis", "plasma"], index=0)
-                    plot_method = st.selectbox("Plot Method", ["Simple Matplotlib", "readgssi radargram"], index=0)
-                
-                with col_b:
-                    if plot_method == "Simple Matplotlib":
-                        normalize = st.checkbox("Normalize data", value=True)
-                        aspect_ratio = st.selectbox("Aspect Ratio", ["auto", "equal"], index=0)
-                    else:
-                        x_units = st.selectbox("X-axis units", ["seconds", "distance", "traces"], index=0)
-                        z_units = st.selectbox("Z-axis units", ["nanoseconds", "depth", "samples"], index=0)
-                
-                plot_button = st.form_submit_button("Generate Radargram")
-
+                    x_units = st.selectbox("X-axis units", ["traces", "seconds", "meters", "kilometers", "centimeters"], index=0)
+                with col_d2:
+                    z_units = st.selectbox("Z-axis units", ["samples", "nanoseconds", "depth"], index=0)
+                    dpi = st.slider("Image resolution (DPI)", 72, 600, 150, 50)
+            
+            # Plot button
+            plot_button = st.button("🚀 Generate Processed Radargram", type="primary")
+        
             if plot_button and len(arrs) > 0:
-                with st.spinner('Generating radargram...'):
-                    # Create a temporary file for the plot image
+                with st.spinner('Processing and plotting radar data...'):
+                    # Create a temporary file for the plot
                     plot_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
                     plot_path = plot_temp.name
                     plot_temp.close()
                     
                     try:
-                        if plot_method == "readgssi radargram":
-                            # Try the readgssi radargram function with safer parameters
-                            from readgssi.plot import radargram
-                            import matplotlib
-                            matplotlib.use('Agg')
-                            import matplotlib.pyplot as plt
-                            
-                            # Try with a simpler parameter set
-                            radargram(
-                                ar=arrs[0],
-                                ant=0,
-                                header=hdr,
-                                freq=hdr.get('antfreq', [100])[0],
-                                figsize=(10, 6),
-                                gain=gain,
-                                stack=1,
-                                x=x_units,
-                                z=z_units,
-                                title=f"Radargram: {uploaded_file.name}",
-                                colormap=colormap,
-                                colorbar=True,
-                                absval=False,
-                                noshow=True,
-                                outfile=plot_path.replace('.png', ''),
-                                fmt='png',
-                                dpi=150,
-                                verbose=False
-                            )
-                        else:
-                            # Use simple matplotlib plotting as fallback
-                            import matplotlib
-                            matplotlib.use('Agg')
-                            import matplotlib.pyplot as plt
-                            
-                            # Get the data array
-                            data = arrs[0].astype(np.float32)
-                            
-                            # Apply gain
-                            if gain != 1.0:
-                                data = data * gain
-                            
-                            # Normalize if requested
-                            if normalize:
-                                data_min = np.nanmin(data)
-                                data_max = np.nanmax(data)
-                                if data_max > data_min:
-                                    data = (data - data_min) / (data_max - data_min)
-                            
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            
-                            # Plot the radargram
-                            im = ax.imshow(data, 
-                                          aspect=aspect_ratio, 
-                                          cmap=colormap,
-                                          interpolation='nearest')
-                            
-                            # Add colorbar
-                            cbar = plt.colorbar(im, ax=ax)
-                            cbar.set_label('Amplitude')
-                            
-                            # Set labels based on header information
-                            ax.set_xlabel('Trace Number')
-                            
-                            # Calculate depth/time axis if possible
-                            if 'spp' in hdr and 'antfreq' in hdr:
-                                samples = hdr['spp']
-                                freq = hdr['antfreq'][0] if isinstance(hdr['antfreq'], list) else hdr['antfreq']
-                                if freq > 0:
-                                    # Convert samples to time (nanoseconds)
-                                    time_ns = np.arange(samples) * (1 / (freq * 1e6)) * 1e9
-                                    ax.set_ylabel(f'Time (ns) - {freq} MHz Antenna')
-                            else:
-                                ax.set_ylabel('Sample Number')
-                            
-                            ax.set_title(f"Radargram: {uploaded_file.name}")
-                            plt.tight_layout()
-                            
-                            # Save the figure
-                            fig.savefig(plot_path, dpi=150, bbox_inches='tight')
-                            plt.close(fig)
+                        # Prepare processing parameters based on user selections
+                        processing_params = {
+                            'infile': tmp_path,
+                            'outfile': plot_path.replace('.png', ''),  # Without extension
+                            'frmt': None,
+                            'plot': True,
+                            'figsize': (12, 8),
+                            'gain': gain,
+                            'colormap': colormap,
+                            'dpi': dpi,
+                            'noshow': True,
+                            'verbose': False
+                        }
                         
-                        # Display the plot in Streamlit
+                        # Apply stacking if selected
+                        if stack_value is not None:
+                            processing_params['stack'] = stack_value
+                        
+                        # Apply BGR filter if selected
+                        if bgr_type != "None":
+                            processing_params['bgr'] = bgr_value
+                        
+                        # Apply frequency filter if selected
+                        if use_freq_filter and freq_max > freq_min:
+                            processing_params['freqmin'] = freq_min
+                            processing_params['freqmax'] = freq_max
+                        
+                        # Apply line reversal if selected
+                        if reverse_line:
+                            processing_params['reverse'] = True
+                        
+                        # Apply X-axis units (with caution about distance units)
+                        if x_units != "traces":
+                            if x_units in ["meters", "kilometers", "centimeters"]:
+                                st.warning(f"Using '{x_units}' for X-axis requires proper GPS data. Ensure your file has associated DZG data for accurate distance normalization.")
+                            processing_params['x'] = x_units[0]  # 'm', 'k', or 'c'
+                        
+                        # Apply Z-axis units
+                        if z_units == "nanoseconds":
+                            processing_params['z'] = 'ns'
+                        elif z_units == "depth":
+                            processing_params['z'] = 'm'
+                        
+                        # Generate the processed plot
+                        from readgssi import readgssi
+                        import matplotlib
+                        matplotlib.use('Agg')
+                        
+                        # Call readgssi with all processing parameters
+                        readgssi.readgssi(**processing_params)
+                        
+                        # Display the result
                         st.image(plot_path, use_column_width=True)
-                        st.success("Radargram generated successfully!")
                         
-                        # Offer download of the plot
+                        # Show applied parameters
+                        st.success("✅ Radargram processed successfully!")
+                        with st.expander("📋 Applied Processing Parameters"):
+                            param_display = {k: v for k, v in processing_params.items() if k not in ['infile', 'outfile', 'noshow', 'verbose']}
+                            st.json(param_display)
+                        
+                        # Download button
                         with open(plot_path, "rb") as file:
-                            btn = st.download_button(
-                                label="Download Radargram (PNG)",
+                            st.download_button(
+                                label="Download Processed Radargram",
                                 data=file,
-                                file_name=f"{uploaded_file.name.replace('.DZT', '')}_radargram.png",
+                                file_name=f"{uploaded_file.name.replace('.DZT', '')}_processed.png",
                                 mime="image/png"
                             )
                         
-                    except Exception as plot_error:
-                        st.error(f"Plot generation error: {str(plot_error)}")
-                        
-                        # Show simplified traceback for debugging
-                        with st.expander("Technical Details (for debugging)"):
-                            st.code(traceback.format_exc())
-                        
-                        # Offer a basic plot as fallback
-                        if st.button("Generate Basic Plot Instead"):
-                            import matplotlib
-                            matplotlib.use('Agg')
-                            import matplotlib.pyplot as plt
-                            
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            ax.imshow(arrs[0], aspect='auto', cmap=colormap)
-                            ax.set_title(f"Basic Plot: {uploaded_file.name}")
-                            ax.set_xlabel('Trace')
-                            ax.set_ylabel('Sample')
-                            plt.tight_layout()
-                            fig.savefig(plot_path, dpi=150)
-                            st.image(plot_path, use_column_width=True)
-                    
+                    except Exception as e:
+                        st.error(f"Processing error: {str(e)}")
+                        st.info("Try simplifying the filter combination or reducing parameter values.")
                     finally:
-                        # Clean up temporary plot file
                         if os.path.exists(plot_path):
                             os.unlink(plot_path)
 
@@ -233,3 +239,4 @@ else:
     - Ensure your `readgssi` installation is complete
     - Check that uploaded files are valid GSSI DZT files
     """)
+
