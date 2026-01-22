@@ -18,8 +18,8 @@ st.set_page_config(
 )
 
 # Title
-st.title("📡 GPR Data Processor with Depth Scaling & FFT Analysis")
-st.markdown("Process GPR data with custom depth/distance scaling and frequency analysis")
+st.title("📡 GPR Data Processor with Custom Depth Windows")
+st.markdown("Process GPR data with custom depth windows and zoom capabilities")
 
 # Custom CSS
 st.markdown("""
@@ -39,6 +39,13 @@ st.markdown("""
         padding: 15px;
         border-left: 4px solid #4CAF50;
     }
+    .window-box {
+        background-color: #e8f4fd;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 10px 0;
+        border: 2px dashed #1e88e5;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -49,6 +56,8 @@ if 'original_array' not in st.session_state:
     st.session_state.original_array = None
 if 'processed_array' not in st.session_state:
     st.session_state.processed_array = None
+if 'depth_windows' not in st.session_state:
+    st.session_state.depth_windows = []
 
 # Sidebar
 with st.sidebar:
@@ -80,6 +89,42 @@ with st.sidebar:
     if distance_unit != "traces":
         total_distance = st.number_input(f"Total Distance ({distance_unit})", 0.1, 10000.0, 250.0, 0.1,
                                         help=f"Set total survey distance in {distance_unit}")
+    
+    st.markdown("---")
+    st.header("📊 Depth Windows")
+    
+    st.markdown("""
+    **Define custom depth windows:**
+    - Example: For 0-12m total depth
+    - Window 1: 0-5m
+    - Window 2: 5-9m
+    - Window 3: 9-12m
+    """)
+    
+    num_windows = st.number_input("Number of Windows", 1, 10, 1, 
+                                 help="How many depth windows to create")
+    
+    # Initialize windows in session state
+    if 'windows' not in st.session_state:
+        st.session_state.windows = [{"name": f"Window {i+1}", "min": 0.0, "max": max_depth if depth_unit != "samples" else 100} 
+                                   for i in range(num_windows)]
+    
+    # Dynamic window inputs
+    for i in range(num_windows):
+        st.markdown(f"**Window {i+1}**")
+        col1, col2 = st.columns(2)
+        with col1:
+            min_val = st.number_input(f"Min {depth_unit}", 0.0, max_depth if depth_unit != "samples" else 1000.0, 
+                                     float(i * (max_depth/num_windows)) if depth_unit != "samples" else 0.0, 0.1,
+                                     key=f"window_{i}_min")
+        with col2:
+            max_val = st.number_input(f"Max {depth_unit}", 0.0, max_depth if depth_unit != "samples" else 1000.0, 
+                                     float((i+1) * (max_depth/num_windows)) if depth_unit != "samples" else 100.0, 0.1,
+                                     key=f"window_{i}_max")
+        
+        # Update session state
+        if min_val < max_val:
+            st.session_state.windows[i] = {"name": f"Window {i+1}", "min": min_val, "max": max_val}
     
     st.markdown("---")
     st.header("🎛️ Processing Parameters")
@@ -247,6 +292,17 @@ def scale_axes(array_shape, depth_unit, max_depth, distance_unit, total_distance
     
     return x_axis, y_axis, x_label, y_label
 
+def get_depth_window_indices(y_axis, window_min, window_max):
+    """Get array indices for a specific depth window"""
+    # Find indices within the window
+    mask = (y_axis >= window_min) & (y_axis <= window_max)
+    indices = np.where(mask)[0]
+    
+    if len(indices) > 0:
+        return indices[0], indices[-1]
+    else:
+        return 0, len(y_axis) - 1
+
 # Main content
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
@@ -347,9 +403,9 @@ if dzt_file and process_btn:
                     
                     # Store axis scaling parameters
                     st.session_state.depth_unit = depth_unit
-                    st.session_state.max_depth = max_depth if depth_unit != "samples" else None
+                    st.session_state.max_depth = max_depth if depth_unit != "samples" else original_array.shape[0]
                     st.session_state.distance_unit = distance_unit
-                    st.session_state.total_distance = total_distance if distance_unit != "traces" else None
+                    st.session_state.total_distance = total_distance if distance_unit != "traces" else original_array.shape[1]
                     
                     progress_bar.progress(100)
                     st.success("✅ Data processed successfully!")
@@ -363,8 +419,17 @@ if dzt_file and process_btn:
 
 # Display results if data is loaded
 if st.session_state.data_loaded:
+    # Create scaled axes
+    x_axis, y_axis, x_label, y_label = scale_axes(
+        st.session_state.processed_array.shape,
+        st.session_state.depth_unit,
+        st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+        st.session_state.distance_unit,
+        st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None
+    )
+    
     # Create tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Header Info", "📈 Radar Profile", "📉 FFT Analysis", "🎛️ Gain Analysis", "💾 Export"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Header Info", "📈 Full Profile", "🔍 Depth Windows", "📉 FFT Analysis", "💾 Export"])
     
     with tab1:
         st.subheader("File Information & Scaling Settings")
@@ -391,7 +456,8 @@ if st.session_state.data_loaded:
                     "System": st.session_state.header.get('system', 'Unknown'),
                     "Antenna Frequency": f"{st.session_state.header.get('ant_freq', 'N/A')} MHz",
                     "Samples per Trace": st.session_state.header.get('spt', 'N/A'),
-                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A')
+                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A'),
+                    "Sampling Depth": f"{st.session_state.header.get('depth', 'N/A'):.2f} m"
                 }
                 
                 for key, value in info_data.items():
@@ -419,125 +485,291 @@ if st.session_state.data_loaded:
                 st.json(st.session_state.header)
     
     with tab2:
-        st.subheader("Radar Profile with Custom Scaling")
-        
-        # Create scaled axes
-        x_axis, y_axis, x_label, y_label = scale_axes(
-            st.session_state.processed_array.shape,
-            st.session_state.depth_unit,
-            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-            st.session_state.distance_unit,
-            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None
-        )
+        st.subheader("Full Radar Profile")
         
         # Display options
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            show_full_profile = st.checkbox("Show Full Profile", True)
+            colormap = st.selectbox("Colormap", ["seismic", "RdBu", "gray", "viridis", "jet", "coolwarm"])
+        
+        with col2:
+            show_colorbar = st.checkbox("Show Colorbar", True)
+            normalize_colors = st.checkbox("Auto-normalize Colors", True)
+        
+        if show_full_profile:
+            # Create figure for full profile
+            fig_full, ax_full = plt.subplots(figsize=(14, 8))
+            
+            if normalize_colors:
+                vmax = np.percentile(np.abs(st.session_state.processed_array), 99)
+                vmin = -vmax
+            else:
+                vmin, vmax = -0.5, 0.5
+            
+            im_full = ax_full.imshow(st.session_state.processed_array, 
+                                    extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
+                                    aspect='auto', cmap=colormap, 
+                                    vmin=vmin, vmax=vmax)
+            
+            ax_full.set_xlabel(x_label)
+            ax_full.set_ylabel(y_label)
+            ax_full.set_title(f"Full Profile: 0 to {y_axis[-1]:.2f} {st.session_state.depth_unit}")
+            ax_full.grid(True, alpha=0.2, linestyle='--')
+            
+            # Mark depth windows on full profile
+            for i, window in enumerate(st.session_state.windows):
+                ax_full.axhline(y=window['min'], color='yellow', linestyle='--', alpha=0.7, linewidth=1)
+                ax_full.axhline(y=window['max'], color='yellow', linestyle='--', alpha=0.7, linewidth=1)
+                ax_full.fill_between([x_axis[0], x_axis[-1]], window['min'], window['max'], 
+                                    alpha=0.1, color='yellow')
+                ax_full.text(x_axis[0], (window['min'] + window['max'])/2, 
+                            f"W{i+1}", color='yellow', fontweight='bold',
+                            backgroundcolor='black', alpha=0.7)
+            
+            if show_colorbar:
+                plt.colorbar(im_full, ax=ax_full, label='Amplitude')
+            
+            plt.tight_layout()
+            st.pyplot(fig_full)
+        
+        # Depth statistics
+        st.subheader("Depth Statistics")
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            show_colorbar = st.checkbox("Show Colorbar", True)
-            interpolation = st.selectbox("Interpolation", ["none", "bilinear", "bicubic", "gaussian"])
+            st.markdown(f"**Total Depth Range:**")
+            st.metric("Min", f"{y_axis[0]:.2f} {st.session_state.depth_unit}")
+            st.metric("Max", f"{y_axis[-1]:.2f} {st.session_state.depth_unit}")
         
         with col2:
-            colormap = st.selectbox("Colormap", ["seismic", "RdBu", "gray", "viridis", "jet"])
-            aspect_ratio = st.selectbox("Aspect Ratio", ["auto", "equal", 0.5, 1.0, 2.0])
+            st.markdown(f"**Data Statistics:**")
+            st.metric("Mean Amplitude", f"{st.session_state.processed_array.mean():.2e}")
+            st.metric("Std Deviation", f"{st.session_state.processed_array.std():.2e}")
         
         with col3:
-            vmin = st.number_input("Color Min", -1.0, 0.0, -0.5, 0.01)
-            vmax = st.number_input("Color Max", 0.0, 1.0, 0.5, 0.01)
-            normalize_colors = st.checkbox("Auto-normalize Colors", True)
-        
-        # Create figure
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
-        
-        # Plot original
-        if normalize_colors:
-            vmax_plot = np.percentile(np.abs(st.session_state.original_array), 99)
-            vmin_plot = -vmax_plot
-        else:
-            vmin_plot, vmax_plot = vmin, vmax
-        
-        im1 = ax1.imshow(st.session_state.original_array, 
-                        extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
-                        aspect=aspect_ratio, cmap=colormap, 
-                        vmin=vmin_plot, vmax=vmax_plot,
-                        interpolation=interpolation)
-        
-        ax1.set_xlabel(x_label)
-        ax1.set_ylabel(y_label)
-        ax1.set_title("Original Data")
-        ax1.grid(True, alpha=0.3, linestyle='--')
-        
-        if show_colorbar:
-            plt.colorbar(im1, ax=ax1, label='Amplitude')
-        
-        # Plot processed
-        im2 = ax2.imshow(st.session_state.processed_array,
-                        extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
-                        aspect=aspect_ratio, cmap=colormap,
-                        vmin=vmin_plot, vmax=vmax_plot,
-                        interpolation=interpolation)
-        
-        ax2.set_xlabel(x_label)
-        ax2.set_ylabel(y_label)
-        ax2.set_title(f"Processed ({gain_type} Gain)")
-        ax2.grid(True, alpha=0.3, linestyle='--')
-        
-        if show_colorbar:
-            plt.colorbar(im2, ax=ax2, label='Amplitude')
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-        # Add annotations
-        st.markdown(f"""
-        **Axis Scaling Applied:**
-        - **Y-axis:** {y_label} (0 to {y_axis[-1]:.2f} {st.session_state.depth_unit})
-        - **X-axis:** {x_label} (0 to {x_axis[-1]:.2f} {st.session_state.distance_unit})
-        """)
-        
-        # Depth slice view
-        st.subheader("Depth Slice Analysis")
-        
-        depth_slice = st.slider("Select Depth Slice", 
-                               min_value=0, 
-                               max_value=len(y_axis)-1,
-                               value=len(y_axis)//2)
-        
-        fig_slice, ax_slice = plt.subplots(figsize=(12, 4))
-        ax_slice.plot(x_axis, st.session_state.processed_array[depth_slice, :], 
-                     'b-', linewidth=1.5, alpha=0.8)
-        ax_slice.fill_between(x_axis, 0, st.session_state.processed_array[depth_slice, :], 
-                             alpha=0.3, color='blue')
-        ax_slice.set_xlabel(x_label)
-        ax_slice.set_ylabel("Amplitude")
-        ax_slice.set_title(f"Depth Slice at {y_axis[depth_slice]:.2f} {st.session_state.depth_unit}")
-        ax_slice.grid(True, alpha=0.3)
-        
-        st.pyplot(fig_slice)
+            st.markdown(f"**Defined Windows:**")
+            for i, window in enumerate(st.session_state.windows):
+                window_size = window['max'] - window['min']
+                st.markdown(f"**W{i+1}:** {window['min']:.2f} - {window['max']:.2f} {st.session_state.depth_unit} ({window_size:.2f})")
     
     with tab3:
+        st.subheader("Custom Depth Windows Analysis")
+        
+        # Window selection
+        st.markdown("### Select Windows to Display")
+        
+        # Create checkboxes for each window
+        selected_windows = []
+        cols = st.columns(min(4, len(st.session_state.windows)))
+        
+        for i, window in enumerate(st.session_state.windows):
+            with cols[i % 4]:
+                if st.checkbox(f"Window {i+1}", True, key=f"show_window_{i}"):
+                    selected_windows.append(i)
+        
+        # Display options for windows
+        if selected_windows:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                window_colormap = st.selectbox("Window Colormap", 
+                                              ["seismic", "RdBu", "gray", "viridis", "jet", "coolwarm"],
+                                              key="window_cmap")
+                window_interp = st.selectbox("Interpolation", 
+                                            ["none", "bilinear", "bicubic", "gaussian"],
+                                            key="window_interp")
+            
+            with col2:
+                show_window_colorbar = st.checkbox("Show Colorbars", True, key="window_cbar")
+                normalize_windows = st.checkbox("Normalize Each Window", False,
+                                               help="Normalize color scale for each window independently")
+            
+            # Determine layout
+            n_windows = len(selected_windows)
+            if n_windows <= 2:
+                n_rows, n_cols = 1, n_windows
+                fig_size = (6 * n_cols, 8)
+            elif n_windows <= 4:
+                n_rows, n_cols = 2, 2
+                fig_size = (12, 16)
+            else:
+                n_rows, n_cols = (n_windows + 1) // 2, 2
+                fig_size = (12, 4 * n_rows)
+            
+            # Create figure for windows
+            fig_windows, axes = plt.subplots(n_rows, n_cols, figsize=fig_size)
+            
+            if n_windows == 1:
+                axes = np.array([axes])
+            if n_rows == 1 and n_cols > 1:
+                axes = axes.flatten()
+            elif n_rows > 1 and n_cols > 1:
+                axes = axes.flatten()
+            
+            # Plot each selected window
+            for idx, window_idx in enumerate(selected_windows):
+                if idx < len(axes):
+                    window = st.session_state.windows[window_idx]
+                    
+                    # Get indices for this window
+                    start_idx, end_idx = get_depth_window_indices(y_axis, window['min'], window['max'])
+                    
+                    # Extract window data
+                    window_data = st.session_state.processed_array[start_idx:end_idx+1, :]
+                    window_y_axis = y_axis[start_idx:end_idx+1]
+                    
+                    # Determine color scale
+                    if normalize_windows:
+                        vmax_window = np.percentile(np.abs(window_data), 99)
+                        vmin_window = -vmax_window
+                    else:
+                        vmax_window = np.percentile(np.abs(st.session_state.processed_array), 99)
+                        vmin_window = -vmax_window
+                    
+                    # Plot window
+                    im = axes[idx].imshow(window_data,
+                                         extent=[x_axis[0], x_axis[-1], window_y_axis[-1], window_y_axis[0]],
+                                         aspect='auto', cmap=window_colormap,
+                                         vmin=vmin_window, vmax=vmax_window,
+                                         interpolation=window_interp)
+                    
+                    axes[idx].set_xlabel(x_label)
+                    axes[idx].set_ylabel(y_label)
+                    axes[idx].set_title(f"Window {window_idx+1}: {window['min']:.2f} - {window['max']:.2f} {st.session_state.depth_unit}")
+                    axes[idx].grid(True, alpha=0.2, linestyle='--')
+                    
+                    if show_window_colorbar:
+                        plt.colorbar(im, ax=axes[idx], label='Amplitude')
+            
+            # Hide unused subplots
+            for idx in range(len(selected_windows), len(axes)):
+                axes[idx].axis('off')
+            
+            plt.tight_layout()
+            st.pyplot(fig_windows)
+            
+            # Window statistics
+            st.subheader("Window Statistics")
+            
+            stats_data = []
+            for window_idx in selected_windows:
+                window = st.session_state.windows[window_idx]
+                start_idx, end_idx = get_depth_window_indices(y_axis, window['min'], window['max'])
+                window_data = st.session_state.processed_array[start_idx:end_idx+1, :]
+                
+                stats_data.append({
+                    "Window": f"W{window_idx+1}",
+                    "Depth Range": f"{window['min']:.2f} - {window['max']:.2f} {st.session_state.depth_unit}",
+                    "Size": f"{window['max'] - window['min']:.2f} {st.session_state.depth_unit}",
+                    "Min Amp": f"{window_data.min():.2e}",
+                    "Max Amp": f"{window_data.max():.2e}",
+                    "Mean Amp": f"{window_data.mean():.2e}",
+                    "Std Dev": f"{window_data.std():.2e}"
+                })
+            
+            stats_df = pd.DataFrame(stats_data)
+            st.dataframe(stats_df, use_container_width=True)
+            
+            # Trace comparison across windows
+            st.subheader("Trace Comparison Across Windows")
+            
+            trace_idx = st.slider("Select Trace for Comparison", 
+                                 0, st.session_state.processed_array.shape[1]-1, 
+                                 st.session_state.processed_array.shape[1]//2,
+                                 key="window_trace")
+            
+            fig_trace_comparison, ax_trace = plt.subplots(figsize=(12, 8))
+            
+            colors = plt.cm.tab10(np.linspace(0, 1, len(selected_windows)))
+            
+            for window_idx, color in zip(selected_windows, colors):
+                window = st.session_state.windows[window_idx]
+                start_idx, end_idx = get_depth_window_indices(y_axis, window['min'], window['max'])
+                
+                window_y = y_axis[start_idx:end_idx+1]
+                window_trace = st.session_state.processed_array[start_idx:end_idx+1, trace_idx]
+                
+                ax_trace.plot(window_trace, window_y, 
+                             color=color, linewidth=2, alpha=0.8,
+                             label=f"W{window_idx+1}: {window['min']:.2f}-{window['max']:.2f}")
+                ax_trace.fill_betweenx(window_y, 0, window_trace, 
+                                      alpha=0.2, color=color)
+            
+            ax_trace.set_xlabel("Amplitude")
+            ax_trace.set_ylabel(f"Depth ({st.session_state.depth_unit})")
+            ax_trace.set_title(f"Trace {trace_idx} Comparison Across Windows")
+            ax_trace.grid(True, alpha=0.3)
+            ax_trace.legend(loc='upper right')
+            ax_trace.invert_yaxis()
+            
+            st.pyplot(fig_trace_comparison)
+            
+            # Export windows data
+            st.subheader("Export Window Data")
+            
+            export_cols = st.columns(min(4, len(selected_windows)))
+            
+            for idx, window_idx in enumerate(selected_windows):
+                with export_cols[idx % 4]:
+                    window = st.session_state.windows[window_idx]
+                    start_idx, end_idx = get_depth_window_indices(y_axis, window['min'], window['max'])
+                    window_data = st.session_state.processed_array[start_idx:end_idx+1, :]
+                    
+                    # Create DataFrame
+                    window_df = pd.DataFrame(window_data)
+                    
+                    # Download button
+                    csv_string = window_df.to_csv(index=False)
+                    
+                    st.download_button(
+                        label=f"📥 W{window_idx+1}",
+                        data=csv_string,
+                        file_name=f"window_{window_idx+1}_data.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+        
+        else:
+            st.info("No windows selected. Please select at least one window to display.")
+    
+    with tab4:
         st.subheader("Frequency vs Amplitude Analysis (FFT)")
         
         # FFT analysis options
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            trace_for_fft = st.slider("Select Trace for FFT", 
-                                     0, st.session_state.processed_array.shape[1]-1, 
-                                     st.session_state.processed_array.shape[1]//2)
+            fft_mode = st.selectbox("FFT Mode", 
+                                   ["Single Trace", "Average of All Traces", "Trace Range", "Depth Window"],
+                                   key="fft_mode")
+            
+            if fft_mode == "Depth Window":
+                window_for_fft = st.selectbox("Select Window", 
+                                             [f"Window {i+1}" for i in range(len(st.session_state.windows))],
+                                             key="fft_window")
+                window_idx = int(window_for_fft.split(" ")[1]) - 1
+                window = st.session_state.windows[window_idx]
+                start_idx, end_idx = get_depth_window_indices(y_axis, window['min'], window['max'])
         
         with col2:
-            sampling_rate = st.number_input("Sampling Rate (MHz)", 100, 5000, 1000, 100,
-                                           help="Antenna sampling rate in MHz")
+            if fft_mode == "Single Trace":
+                trace_for_fft = st.slider("Select Trace for FFT", 
+                                         0, st.session_state.processed_array.shape[1]-1, 
+                                         st.session_state.processed_array.shape[1]//2,
+                                         key="fft_trace")
+            elif fft_mode == "Trace Range":
+                trace_start = st.number_input("Start Trace", 0, st.session_state.processed_array.shape[1]-1, 0,
+                                             key="fft_start")
+                trace_end = st.number_input("End Trace", 0, st.session_state.processed_array.shape[1]-1, 
+                                           st.session_state.processed_array.shape[1]-1,
+                                           key="fft_end")
         
         with col3:
-            fft_mode = st.selectbox("FFT Mode", ["Single Trace", "Average of All Traces", "Trace Range"])
-        
-        if fft_mode == "Trace Range":
-            trace_start = st.number_input("Start Trace", 0, st.session_state.processed_array.shape[1]-1, 0)
-            trace_end = st.number_input("End Trace", 0, st.session_state.processed_array.shape[1]-1, 
-                                       st.session_state.processed_array.shape[1]-1)
-            traces_for_fft = range(trace_start, trace_end+1)
+            sampling_rate = st.number_input("Sampling Rate (MHz)", 100, 5000, 1000, 100,
+                                           help="Antenna sampling rate in MHz",
+                                           key="fft_sampling")
         
         # Calculate FFT
         if fft_mode == "Single Trace":
@@ -550,10 +782,16 @@ if st.session_state.data_loaded:
             freq, amplitude = calculate_fft(avg_trace, sampling_rate)
             title = "FFT - Average of All Traces"
         
-        else:  # Trace Range
+        elif fft_mode == "Trace Range":
             avg_trace = np.mean(st.session_state.processed_array[:, trace_start:trace_end+1], axis=1)
             freq, amplitude = calculate_fft(avg_trace, sampling_rate)
             title = f"FFT - Traces {trace_start} to {trace_end}"
+        
+        elif fft_mode == "Depth Window":
+            window_data = st.session_state.processed_array[start_idx:end_idx+1, :]
+            avg_trace = np.mean(window_data, axis=1)
+            freq, amplitude = calculate_fft(avg_trace, sampling_rate)
+            title = f"FFT - Window: {window['min']:.2f}-{window['max']:.2f} {st.session_state.depth_unit}"
         
         # Plot FFT
         fig_fft, (ax_fft1, ax_fft2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -611,86 +849,6 @@ if st.session_state.data_loaded:
             st.metric("Bandwidth (-3dB)", f"{bandwidth:.1f} MHz")
         with col4:
             st.metric("Center Freq", f"{(low_freq + high_freq)/2:.1f} MHz")
-        
-        # Frequency domain waterfall plot
-        st.subheader("Frequency Spectrum Waterfall")
-        
-        # Select traces for waterfall
-        num_waterfall_traces = st.slider("Number of Traces for Waterfall", 5, 50, 20)
-        trace_step = st.session_state.processed_array.shape[1] // num_waterfall_traces
-        
-        fig_waterfall, ax_waterfall = plt.subplots(figsize=(12, 8))
-        
-        for i in range(0, st.session_state.processed_array.shape[1], trace_step):
-            trace_data = st.session_state.processed_array[:, i]
-            freq_w, amplitude_w = calculate_fft(trace_data, sampling_rate)
-            
-            # Normalize and offset
-            amplitude_norm = amplitude_w / np.max(amplitude_w) if np.max(amplitude_w) > 0 else amplitude_w
-            offset = i / trace_step * 0.5
-            
-            ax_waterfall.plot(freq_w, amplitude_norm + offset, alpha=0.7, linewidth=0.8)
-        
-        ax_waterfall.set_xlabel("Frequency (MHz)")
-        ax_waterfall.set_ylabel("Normalized Amplitude + Offset")
-        ax_waterfall.set_title("Frequency Spectrum Waterfall (Multiple Traces)")
-        ax_waterfall.grid(True, alpha=0.3)
-        ax_waterfall.set_xlim([0, sampling_rate/2])
-        
-        st.pyplot(fig_waterfall)
-    
-    with tab4:
-        st.subheader("Gain Analysis")
-        
-        # Calculate gain profile
-        n_samples = st.session_state.original_array.shape[0]
-        
-        with np.errstate(divide='ignore', invalid='ignore'):
-            gain_profile = np.zeros(n_samples)
-            for i in range(n_samples):
-                orig_slice = st.session_state.original_array[i, :]
-                proc_slice = st.session_state.processed_array[i, :]
-                
-                mask = np.abs(orig_slice) > 1e-10
-                if np.any(mask):
-                    gains = np.abs(proc_slice[mask]) / np.abs(orig_slice[mask])
-                    gain_profile[i] = np.median(gains)
-                else:
-                    gain_profile[i] = 1.0
-        
-        # Create scaled depth axis
-        y_axis_analysis, _, _, y_label_analysis = scale_axes(
-            (n_samples, 1),
-            st.session_state.depth_unit,
-            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-            "traces",
-            None
-        )
-        
-        # Plot gain profile
-        fig_gain, ax_gain = plt.subplots(figsize=(10, 6))
-        
-        ax_gain.plot(gain_profile, y_axis_analysis, 'b-', linewidth=2, label='Gain Factor')
-        ax_gain.fill_betweenx(y_axis_analysis, 1, gain_profile, alpha=0.3, color='blue')
-        
-        ax_gain.set_xlabel("Gain Factor (multiplier)")
-        ax_gain.set_ylabel(y_label_analysis)
-        ax_gain.set_title("Gain Applied vs Depth")
-        ax_gain.grid(True, alpha=0.3)
-        ax_gain.legend()
-        ax_gain.invert_yaxis()  # Depth increases downward
-        
-        st.pyplot(fig_gain)
-        
-        # Show statistics
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Min Gain", f"{gain_profile.min():.2f}x")
-        with col2:
-            st.metric("Max Gain", f"{gain_profile.max():.2f}x")
-        with col3:
-            st.metric("Mean Gain", f"{gain_profile.mean():.2f}x")
     
     with tab5:
         st.subheader("Export Processed Data")
@@ -699,126 +857,85 @@ if st.session_state.data_loaded:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("💾 Save Radar Image", use_container_width=True):
+            if st.button("💾 Save Full Profile", use_container_width=True):
                 fig, ax = plt.subplots(figsize=(12, 8))
                 
-                x_axis_export, y_axis_export, x_label_export, y_label_export = scale_axes(
-                    st.session_state.processed_array.shape,
-                    st.session_state.depth_unit,
-                    st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-                    st.session_state.distance_unit,
-                    st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None
-                )
-                
                 im = ax.imshow(st.session_state.processed_array,
-                             extent=[x_axis_export[0], x_axis_export[-1], 
-                                    y_axis_export[-1], y_axis_export[0]],
+                             extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
                              aspect='auto', cmap='seismic')
-                ax.set_xlabel(x_label_export)
-                ax.set_ylabel(y_label_export)
-                ax.set_title(f"GPR Data - {gain_type} Gain")
+                ax.set_xlabel(x_label)
+                ax.set_ylabel(y_label)
+                ax.set_title(f"GPR Full Profile - {gain_type} Gain")
                 plt.colorbar(im, ax=ax, label='Amplitude')
                 plt.tight_layout()
-                plt.savefig("processed_gpr_data.png", dpi=300, bbox_inches='tight')
-                st.success("Saved as 'processed_gpr_data.png'")
+                plt.savefig("gpr_full_profile.png", dpi=300, bbox_inches='tight')
+                st.success("Saved as 'gpr_full_profile.png'")
         
         with col2:
+            # Export all windows
+            if len(selected_windows) > 0:
+                if st.button("💾 Save All Windows", use_container_width=True):
+                    n_windows = len(selected_windows)
+                    fig_w, axes_w = plt.subplots(n_windows, 1, figsize=(12, 4*n_windows))
+                    
+                    if n_windows == 1:
+                        axes_w = [axes_w]
+                    
+                    for idx, window_idx in enumerate(selected_windows):
+                        window = st.session_state.windows[window_idx]
+                        start_idx, end_idx = get_depth_window_indices(y_axis, window['min'], window['max'])
+                        window_data = st.session_state.processed_array[start_idx:end_idx+1, :]
+                        window_y_axis = y_axis[start_idx:end_idx+1]
+                        
+                        im = axes_w[idx].imshow(window_data,
+                                              extent=[x_axis[0], x_axis[-1], window_y_axis[-1], window_y_axis[0]],
+                                              aspect='auto', cmap='seismic')
+                        axes_w[idx].set_xlabel(x_label)
+                        axes_w[idx].set_ylabel(y_label)
+                        axes_w[idx].set_title(f"Window {window_idx+1}: {window['min']:.2f} - {window['max']:.2f} {st.session_state.depth_unit}")
+                        plt.colorbar(im, ax=axes_w[idx], label='Amplitude')
+                    
+                    plt.tight_layout()
+                    plt.savefig("gpr_windows.png", dpi=300, bbox_inches='tight')
+                    st.success("Saved as 'gpr_windows.png'")
+        
+        with col3:
             # Export as CSV with scaled axes
-            x_axis_csv = scale_axes(
-                st.session_state.processed_array.shape,
-                st.session_state.depth_unit,
-                st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-                st.session_state.distance_unit,
-                st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None
-            )[0]
-            
             csv_data = pd.DataFrame(st.session_state.processed_array, 
-                                  columns=[f"{xi:.2f}" for xi in x_axis_csv])
+                                  columns=[f"{xi:.2f}" for xi in x_axis])
             csv_string = csv_data.to_csv(index=False)
             
             st.download_button(
-                label="📥 Download as CSV",
+                label="📥 Full Data CSV",
                 data=csv_string,
-                file_name="processed_gpr_data.csv",
+                file_name="gpr_full_data.csv",
                 mime="text/csv",
                 use_container_width=True
             )
         
-        with col3:
-            # Export as NumPy binary with metadata
-            metadata = {
-                'shape': st.session_state.processed_array.shape,
-                'dtype': str(st.session_state.processed_array.dtype),
-                'gain_type': gain_type,
-                'depth_unit': st.session_state.depth_unit,
-                'max_depth': st.session_state.max_depth,
-                'distance_unit': st.session_state.distance_unit,
-                'total_distance': st.session_state.total_distance
+        with col4:
+            # Export settings
+            settings = {
+                "Gain Type": gain_type,
+                "Time Zero": time_zero,
+                "Depth Unit": st.session_state.depth_unit,
+                "Max Depth": st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else "Auto",
+                "Distance Unit": st.session_state.distance_unit,
+                "Total Distance": st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else "Auto",
+                "Windows": str(st.session_state.windows),
+                "Date Processed": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             
-            # Save both array and metadata
-            import pickle
-            export_data = {
-                'array': st.session_state.processed_array,
-                'metadata': metadata,
-                'header': st.session_state.header
-            }
-            
-            pickle_bytes = pickle.dumps(export_data)
+            settings_df = pd.DataFrame(list(settings.items()), columns=["Parameter", "Value"])
+            settings_csv = settings_df.to_csv(index=False)
             
             st.download_button(
-                label="📥 Download as Pickle",
-                data=pickle_bytes,
-                file_name="processed_gpr_data.pkl",
-                mime="application/octet-stream",
+                label="📥 Settings CSV",
+                data=settings_csv,
+                file_name="processing_settings.csv",
+                mime="text/csv",
                 use_container_width=True
             )
-        
-        with col4:
-            # Export FFT data
-            if 'freq' in locals() and 'amplitude' in locals():
-                fft_data = pd.DataFrame({
-                    'Frequency_MHz': freq,
-                    'Amplitude': amplitude
-                })
-                fft_csv = fft_data.to_csv(index=False)
-                
-                st.download_button(
-                    label="📥 Download FFT Data",
-                    data=fft_csv,
-                    file_name="gpr_fft_data.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-        
-        # Export settings summary
-        st.subheader("Processing Settings Summary")
-        
-        settings = {
-            "Gain Type": gain_type,
-            "Time Zero": time_zero,
-            "Stacking": stacking,
-            "Depth Unit": st.session_state.depth_unit,
-            "Max Depth": st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else "Auto",
-            "Distance Unit": st.session_state.distance_unit,
-            "Total Distance": st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else "Auto",
-            "Date Processed": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
-        if gain_type == "Constant":
-            settings["Constant Gain"] = f"{const_gain}%"
-        elif gain_type == "Linear":
-            settings["Min Gain"] = f"{min_gain}%"
-            settings["Max Gain"] = f"{max_gain}%"
-        elif gain_type == "Exponential":
-            settings["Base Gain"] = f"{base_gain}%"
-            settings["Exponential Factor"] = exp_factor
-        elif gain_type == "Spherical":
-            settings["Power Gain"] = power_gain
-            settings["Attenuation"] = attenuation
-        
-        settings_df = pd.DataFrame(list(settings.items()), columns=["Parameter", "Value"])
-        st.table(settings_df)
 
 # Initial state message
 elif not dzt_file:
@@ -828,13 +945,15 @@ elif not dzt_file:
         👈 **Upload a DZT file to begin processing**
         
         **New Features:**
-        1. **Custom Axis Scaling:** Convert samples/traces to meters/feet
-        2. **FFT Analysis:** View frequency vs amplitude distribution
-        3. **Depth Slice Analysis:** Examine specific depth layers
+        1. **Custom Depth Windows:** Zoom into specific depth ranges
+        2. **Multiple Window Display:** View multiple windows side-by-side
+        3. **Window Statistics:** Compare statistics across windows
+        4. **Window FFT:** Perform FFT on specific depth windows
         
-        **Example Scaling:**
-        - If your data has 255 samples, set Depth Unit = "meters", Max Depth = 12
-        - If your data has 800 traces, set Distance Unit = "meters", Total Distance = 250
+        **Example for 0-12m data:**
+        - Window 1: 0-5m (shallow features)
+        - Window 2: 5-9m (mid-depth features)
+        - Window 3: 9-12m (deep features)
         
         **No GPS file needed!** Manual scaling available.
         """)
@@ -843,9 +962,8 @@ elif not dzt_file:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "📡 <b>GPR Data Processor v3.0</b> | Custom Scaling & FFT Analysis | "
+    "📡 <b>GPR Data Processor v4.0</b> | Custom Depth Windows | "
     "Built with Streamlit & readgssi"
     "</div>",
     unsafe_allow_html=True
 )
-
