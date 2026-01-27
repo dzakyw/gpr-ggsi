@@ -11,17 +11,7 @@ from scipy.fft import fft, fftfreq, fftshift
 from scipy.interpolate import interp1d, griddata
 warnings.filterwarnings('ignore')
 
-st.set_page_config(
-    page_title="My App",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'Get Help': 'https://docs.streamlit.io',
-        'Report a bug': "https://github.com/streamlit/streamlit/issues",
-        'About': "# This is a header. This is an *extremely* cool app!"
-    }
-)
+
 # Set page config
 st.set_page_config(
     page_title="GPR Data Processor",
@@ -1040,6 +1030,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
