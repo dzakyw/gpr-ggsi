@@ -11,6 +11,17 @@ from scipy.fft import fft, fftfreq, fftshift
 from scipy.interpolate import interp1d, griddata
 warnings.filterwarnings('ignore')
 
+st.set_page_config(
+    page_title="My App",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://docs.streamlit.io',
+        'Report a bug': "https://github.com/streamlit/streamlit/issues",
+        'About': "# This is a header. This is an *extremely* cool app!"
+    }
+)
 # Set page config
 st.set_page_config(
     page_title="GPR Data Processor",
@@ -690,8 +701,7 @@ if st.session_state.data_loaded:
                     "System": st.session_state.header.get('system', 'Unknown'),
                     "Antenna Frequency": f"{st.session_state.header.get('ant_freq', 'N/A')} MHz",
                     "Samples per Trace": st.session_state.header.get('spt', 'N/A'),
-                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A'),
-                    "Sampling Depth": f"{st.session_state.header.get('depth', 'N/A'):.2f} m"
+                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A')
                 }
                 
                 for key, value in info_data.items():
@@ -1032,3 +1042,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
