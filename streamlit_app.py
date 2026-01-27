@@ -711,12 +711,8 @@ if st.session_state.data_loaded:
         x_axis_full, y_axis_full, x_label_full, y_label_full, _, _ = scale_axes(
             st.session_state.processed_array.shape,
             st.session_state.depth_unit,
-            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-            st.session_state.distance_unit,
-            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
-            coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None
         )
-        
         # Display options
         col1, col2, col3 = st.columns(3)
         
@@ -1560,6 +1556,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
