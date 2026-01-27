@@ -824,10 +824,8 @@ if st.session_state.data_loaded:
                          f"{st.session_state.interpolated_coords['elevation'].max() - st.session_state.interpolated_coords['elevation'].min():.1f} m")
             
             with col2:
-                st.metric("Easting Range", 
-                         f"{st.session_state.interpolated_coords['easting'].ptp():.1f} m")
-                st.metric("Northing Range", 
-                         f"{st.session_state.interpolated_coords['northing'].ptp():.1f} m")
+                st.metric("Easting Range", f"{np.ptp(st.session_state.interpolated_coords['easting']):.1f} m")
+                st.metric("Northing Range", f"{np.ptp(st.session_state.interpolated_coords['northing']):.1f} m")
             
             with col3:
                 avg_spacing = np.mean(np.diff(st.session_state.interpolated_coords['distance']))
@@ -1042,4 +1040,5 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
