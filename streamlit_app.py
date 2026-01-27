@@ -965,12 +965,16 @@ if st.session_state.data_loaded:
             with col2:
                 st.metric("Elevation Change", f"{st.session_state.interpolated_coords['elevation'].max() - st.session_state.interpolated_coords['elevation'].min():.1f} m")
             with col3:
+                easting_series = pd.Series(st.session_state.interpolated_coords['easting'])
                 st.metric("Easting Range", 
-                      f"{np.ptp(st.session_state.interpolated_coords['easting']):.1f} m")
+                          f"{easting_series.ptp():.1f} m")
             with col4:
+                
+                northing_series = pd.Series(st.session_state.interpolated_coords['northing'])
                 st.metric("Northing Range", 
-                      f"{np.ptp(st.session_state.interpolated_coords['northing']):.1f} m")
-            
+                          f"{northing_series.ptp():.1f} m")
+                
+
             # Create coordinate visualizations
             fig_coords, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
             
@@ -1321,5 +1325,6 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
