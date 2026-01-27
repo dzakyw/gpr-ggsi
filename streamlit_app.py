@@ -8,6 +8,32 @@ from pathlib import Path
 import warnings
 from scipy import signal
 from scipy.fft import fft, fftfreq, fftshift
+from pathlib import Path
+
+# Path to the Streamlit config directory
+config_dir = Path.home() / ".streamlit"
+config_dir.mkdir(exist_ok=True)
+
+# Path to the config file
+config_file = config_dir / "config.toml"
+
+# Create config file if it doesn't exist
+if not config_file.exists():
+    config_file.write_text("""[server]
+runOnSave = true
+""")
+    st.info(f"Created config file at {config_file}")
+else:
+    # Check if runOnSave is already set
+    config_content = config_file.read_text()
+    if "runOnSave = true" not in config_content:
+        # Append the setting if file exists but doesn't have it
+        with open(config_file, 'a') as f:
+            f.write("\n[server]\nrunOnSave = true\n")
+        st.info("Added runOnSave setting to config file")
+
+# Now run your Streamlit app normally
+st.title("My App")
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -966,3 +992,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
