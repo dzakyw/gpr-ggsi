@@ -448,7 +448,34 @@ def scale_axes(array_shape, depth_unit, max_depth, distance_unit, total_distance
         x_label = "Distance (km)"
     
     return x_axis, y_axis, x_label, y_label, distance_unit, total_distance
-
+def get_window_indices(x_axis, y_axis, depth_min, depth_max, distance_min, distance_max):
+    """Convert user-specified window coordinates to array indices"""
+    # Find depth indices
+    depth_idx_min = np.argmin(np.abs(y_axis - depth_min))
+    depth_idx_max = np.argmin(np.abs(y_axis - depth_max))
+    
+    # Ensure correct ordering
+    if depth_idx_min > depth_idx_max:
+        depth_idx_min, depth_idx_max = depth_idx_max, depth_idx_min
+    
+    # Find distance indices
+    dist_idx_min = np.argmin(np.abs(x_axis - distance_min))
+    dist_idx_max = np.argmin(np.abs(x_axis - distance_max))
+    
+    # Ensure correct ordering
+    if dist_idx_min > dist_idx_max:
+        dist_idx_min, dist_idx_max = dist_idx_max, dist_idx_min
+    
+    return {
+        'depth_min_idx': depth_idx_min,
+        'depth_max_idx': depth_idx_max,
+        'dist_min_idx': dist_idx_min,
+        'dist_max_idx': dist_idx_max,
+        'depth_min_val': y_axis[depth_idx_min],
+        'depth_max_val': y_axis[depth_idx_max],
+        'dist_min_val': x_axis[dist_idx_min],
+        'dist_max_val': x_axis[dist_idx_max]
+    }
 def get_aspect_ratio(mode, manual_ratio=None, data_shape=None):
     """Calculate aspect ratio based on mode"""
     if mode == "Auto":
@@ -797,7 +824,7 @@ if st.session_state.data_loaded:
             window_info = get_window_indices(
                 x_axis, y_axis,
                 st.session_state.depth_min, st.session_state.depth_max,
-                st.session_state.distance_min, st.session_state.distance_max,_,_
+                st.session_state.distance_min, st.session_state.distance_max,
             )
             
             # Extract windowed data
@@ -1559,6 +1586,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
