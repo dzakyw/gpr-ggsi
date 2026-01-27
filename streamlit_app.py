@@ -10,18 +10,6 @@ from scipy import signal
 from scipy.fft import fft, fftfreq, fftshift
 from scipy.interpolate import interp1d
 warnings.filterwarnings('ignore')
-# Configure the page at the VERY TOP (must be first Streamlit command)
-st.set_page_config(
-    page_title="My App",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'Get Help': 'https://docs.streamlit.io',
-        'Report a bug': "https://github.com/streamlit/streamlit/issues",
-        'About': "# This is a header. This is an *extremely* cool app!"
-    }
-)
 
 # Set page config
 st.set_page_config(
@@ -965,16 +953,10 @@ if st.session_state.data_loaded:
             with col2:
                 st.metric("Elevation Change", f"{st.session_state.interpolated_coords['elevation'].max() - st.session_state.interpolated_coords['elevation'].min():.1f} m")
             with col3:
-                easting_series = pd.Series(st.session_state.interpolated_coords['easting'])
-                st.metric("Easting Range", 
-                          f"{easting_series.ptp():.1f} m")
+                st.metric("Easting Range", f"{st.session_state.interpolated_coords['easting'].ptp():.1f} m")
             with col4:
-                
-                northing_series = pd.Series(st.session_state.interpolated_coords['northing'])
-                st.metric("Northing Range", 
-                          f"{northing_series.ptp():.1f} m")
-                
-
+                st.metric("Northing Range", f"{st.session_state.interpolated_coords['northing'].ptp():.1f} m")
+            
             # Create coordinate visualizations
             fig_coords, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
             
@@ -1325,6 +1307,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
-
-
