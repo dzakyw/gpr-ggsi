@@ -524,8 +524,7 @@ if st.session_state.data_loaded:
                     "System": st.session_state.header.get('system', 'Unknown'),
                     "Antenna Frequency": f"{st.session_state.header.get('ant_freq', 'N/A')} MHz",
                     "Samples": st.session_state.header.get('spt', 'N/A'),
-                    "Traces": st.session_state.header.get('ntraces', 'N/A'),
-                    "Sampling Depth": f"{st.session_state.header.get('depth', 'N/A'):.2f} m"
+                    "Traces": st.session_state.header.get('ntraces', 'N/A')
                 }
                 
                 for key, value in info.items():
@@ -978,3 +977,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
