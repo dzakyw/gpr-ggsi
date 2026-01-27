@@ -1484,7 +1484,7 @@ if st.session_state.data_loaded:
         with col4:
             if st.session_state.use_custom_window:
                 # Export windowed data
-                x_axis, y_axis, x_label, y_label = scale_axes(
+                x_axis, y_axis, x_label, y_label,_,_ = scale_axes(
                     st.session_state.processed_array.shape,
                     st.session_state.depth_unit,
                     st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
@@ -1559,6 +1559,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
