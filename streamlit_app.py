@@ -8,7 +8,7 @@ from pathlib import Path
 import warnings
 from scipy import signal
 from scipy.fft import fft, fftfreq, fftshift
-from scipy.interpolate import interp1d, griddata
+from scipy.interpolate import interp1d
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -19,8 +19,8 @@ st.set_page_config(
 )
 
 # Title
-st.title("📡 GPR Data Processor with Coordinate Import & Aspect Control")
-st.markdown("Process GPR data with CSV coordinate import, interpolation, and aspect ratio control")
+st.title("📡 Advanced GPR Data Processor")
+st.markdown("Process GPR data with coordinate import, aspect control, and advanced windowing")
 
 # Custom CSS
 st.markdown("""
@@ -54,6 +54,13 @@ st.markdown("""
         margin: 10px 0;
         border-left: 4px solid #4CAF50;
     }
+    .aspect-box {
+        background-color: #fff3e0;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 4px solid #FF9800;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -75,18 +82,27 @@ with st.sidebar:
     
     dzt_file = st.file_uploader("Upload DZT file", type=['dzt', 'DZT', '.dzt'])
     dzg_file = st.file_uploader("Upload DZG file (GPS data)", type=['dzg', 'DZG'], 
-                                help="Optional: Required for GPS-based distance normalization")
+                                help="Optional: For GPS-based distance normalization")
     
     st.markdown("---")
     st.header("🗺️ Coordinate Import (Optional)")
     
     # Coordinate CSV upload
     coord_csv = st.file_uploader("Upload CSV with coordinates", type=['csv'], 
-                                help="CSV with columns: Easting, Northing, Elevation (or similar)")
+                                help="CSV with columns: Easting, Northing, Elevation")
     
     if coord_csv:
         st.markdown('<div class="coordinate-box">', unsafe_allow_html=True)
         st.subheader("Coordinate Settings")
+        
+        # Preview CSV
+        try:
+            coords_df = pd.read_csv(coord_csv)
+            st.info(f"CSV loaded: {len(coords_df)} rows, {len(coords_df.columns)} columns")
+            if st.checkbox("Show CSV Preview"):
+                st.dataframe(coords_df.head())
+        except:
+            st.warning("Could not preview CSV")
         
         # Coordinate column mapping
         col1, col2 = st.columns(2)
@@ -96,17 +112,12 @@ with st.sidebar:
         with col2:
             elevation_col = st.text_input("Elevation Column", "Elevation")
             trace_col = st.text_input("Trace Column (optional)", "", 
-                                     help="If CSV has trace numbers matching coordinate points")
+                                     help="If CSV has trace numbers")
         
         # Coordinate interpolation method
         interp_method = st.selectbox("Interpolation Method", 
                                     ["Linear", "Cubic", "Nearest", "Previous", "Next"],
-                                    help="How to interpolate coordinates between points")
-        
-        # Coordinate scaling options
-        coord_units = st.selectbox("Coordinate Units", 
-                                  ["Meters", "Feet", "Kilometers", "Miles"],
-                                  help="Units of the imported coordinates")
+                                    help="Interpolate coordinates between points")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -119,46 +130,48 @@ with st.sidebar:
     
     if depth_unit != "samples":
         max_depth = st.number_input(f"Max Depth ({depth_unit})", 0.1, 1000.0, 12.0, 0.1,
-                                   help=f"Set maximum depth in {depth_unit}")
+                                   help=f"Maximum depth in {depth_unit}")
     
     # Distance scaling (X-axis)
     st.subheader("Distance Scaling (X-axis)")
     use_coords_for_distance = coord_csv is not None and st.checkbox("Use Coordinates for Distance", False,
-                                                                    help="Use imported coordinates for X-axis scaling")
+                                                                    help="Use imported coordinates for X-axis")
     
     if not use_coords_for_distance:
         distance_unit = st.selectbox("Distance Unit", ["traces", "meters", "feet", "kilometers"])
         
         if distance_unit != "traces":
             total_distance = st.number_input(f"Total Distance ({distance_unit})", 0.1, 10000.0, 250.0, 0.1,
-                                            help=f"Set total survey distance in {distance_unit}")
+                                            help=f"Total survey distance in {distance_unit}")
     else:
         st.info("Using coordinate-based distance calculation")
-        distance_unit = "meters"  # Default when using coordinates
+        distance_unit = "meters"
     
     st.markdown("---")
     st.header("📐 Plot Aspect Ratio")
     
+    st.markdown('<div class="aspect-box">', unsafe_allow_html=True)
     # Aspect ratio control
     aspect_mode = st.selectbox("Aspect Ratio Mode", 
                               ["Auto", "Equal", "Manual", "Realistic"],
-                              help="Control the Y:X scale of the plot")
+                              help="Control Y:X scale of the plot")
     
     if aspect_mode == "Manual":
         aspect_ratio = st.selectbox("Aspect Ratio (Y:X)", 
                                    ["1:1", "1:2", "1:4", "1:5", "1:10", "2:1", "4:1", "5:1", "10:1"])
-        # Convert to float
         aspect_ratio_float = float(aspect_ratio.split(":")[0]) / float(aspect_ratio.split(":")[1])
     elif aspect_mode == "Realistic":
         realistic_ratio = st.selectbox("Realistic Ratio", 
                                       ["1:5 (Shallow)", "1:10 (Standard)", "1:20 (Deep)", "1:50 (Very Deep)"])
         aspect_ratio_float = 1 / float(realistic_ratio.split(":")[1].split()[0])
     
+    st.markdown('</div>', unsafe_allow_html=True)
+    
     st.markdown("---")
     st.header("🔍 Plot Windowing")
     
     use_custom_window = st.checkbox("Use Custom Plot Window", False,
-                                   help="Define custom depth and distance ranges for plotting")
+                                   help="Define custom depth and distance ranges")
     
     if use_custom_window:
         st.markdown('<div class="window-box">', unsafe_allow_html=True)
@@ -184,11 +197,41 @@ with st.sidebar:
         
         st.markdown('</div>', unsafe_allow_html=True)
     
+    # Multiple windows option
+    multiple_windows = st.checkbox("Enable Multiple Windows", False,
+                                  help="Plot multiple windows in same view")
+    
+    if multiple_windows and use_custom_window:
+        num_windows = st.number_input("Number of Additional Windows", 1, 5, 1)
+        
+        windows = []
+        for i in range(num_windows):
+            st.markdown(f"**Window {i+2}**")
+            col1, col2 = st.columns(2)
+            with col1:
+                d_min = st.number_input(f"Depth Min {i+2} ({depth_unit})", 0.0, max_depth, 2.0 + i*2, 0.1)
+                d_max = st.number_input(f"Depth Max {i+2} ({depth_unit})", 0.0, max_depth, 5.0 + i*2, 0.1)
+            with col2:
+                if not use_coords_for_distance:
+                    dist_min = st.number_input(f"Dist Min {i+2} ({distance_unit})", 0.0, total_distance, 50.0 + i*50, 0.1)
+                    dist_max = st.number_input(f"Dist Max {i+2} ({distance_unit})", 0.0, total_distance, 150.0 + i*50, 0.1)
+                else:
+                    dist_min = st.number_input(f"Dist Min {i+2} (m)", 0.0, 10000.0, 50.0 + i*50, 0.1)
+                    dist_max = st.number_input(f"Dist Max {i+2} (m)", 0.0, 10000.0, 150.0 + i*50, 0.1)
+            
+            windows.append({
+                'depth_min': d_min,
+                'depth_max': d_max,
+                'distance_min': dist_min,
+                'distance_max': dist_max,
+                'color': f'C{i+1}'
+            })
+    
     st.markdown("---")
     st.header("🎛️ Processing Parameters")
     
     time_zero = st.number_input("Time Zero (samples)", 0, 2000, 2, 
-                               help="Adjust the start time of each trace")
+                               help="Adjust start time of each trace")
     
     stacking = st.selectbox("Stacking", ["none", "auto", "manual"], 
                            help="Reduce noise by averaging traces")
@@ -296,7 +339,6 @@ def apply_gain(array, gain_type, **kwargs):
         power = kwargs.get('power_gain', 2.0)
         attenuation = kwargs.get('attenuation', 0.05)
         
-        # Create spherical spreading correction
         t = np.arange(n_samples) / n_samples
         gain_vector = (1 + attenuation * t) ** power
         gain_vector = gain_vector[:, np.newaxis]
@@ -311,84 +353,53 @@ def calculate_fft(trace, sampling_rate=1000):
     yf = fft(trace)
     xf = fftfreq(n, 1/sampling_rate)[:n//2]
     
-    # Take magnitude
     magnitude = 2.0/n * np.abs(yf[:n//2])
-    
     return xf, magnitude
 
-def process_coordinates(coords_df, n_traces, trace_col=None, method='linear'):
-    """
-    Process and interpolate coordinates to match number of GPR traces
-    
-    Parameters:
-    - coords_df: DataFrame with Easting, Northing, Elevation columns
-    - n_traces: Number of traces in GPR data
-    - trace_col: Column name for trace indices in CSV (optional)
-    - method: Interpolation method ('linear', 'cubic', 'nearest', 'previous', 'next')
-    
-    Returns:
-    - Dictionary with interpolated coordinates and distance along profile
-    """
-    # Check required columns
-    required_cols = ['Easting', 'Northing', 'Elevation']
-    available_cols = {}
-    
-    # Try to find columns (case-insensitive, partial match)
-    for req in required_cols:
-        matches = [col for col in coords_df.columns if req.lower() in col.lower()]
-        if matches:
-            available_cols[req] = matches[0]
-        else:
-            st.error(f"Column '{req}' not found in CSV. Available columns: {list(coords_df.columns)}")
-            return None
-    
-    # Extract data
-    easting = coords_df[available_cols['Easting']].values
-    northing = coords_df[available_cols['Northing']].values
-    elevation = coords_df[available_cols['Elevation']].values
-    
-    # Determine x positions for coordinate points
-    if trace_col and trace_col in coords_df.columns:
-        # Use provided trace indices
-        coord_trace_indices = coords_df[trace_col].values
-    else:
-        # Assume coordinates are evenly spaced along the profile
-        # Use the cumulative distance along the profile
-        dx = np.diff(easting)
-        dy = np.diff(northing)
-        distances = np.sqrt(dx**2 + dy**2)
-        cumulative_dist = np.concatenate(([0], np.cumsum(distances)))
-        coord_trace_indices = np.linspace(0, n_traces-1, len(cumulative_dist))
-    
-    # Target trace indices (all traces)
-    target_trace_indices = np.arange(n_traces)
-    
-    # Interpolate each coordinate component
-    if method == 'linear':
-        kind = 'linear'
-    elif method == 'cubic':
-        kind = 'cubic'
-    elif method == 'nearest':
-        kind = 'nearest'
-    elif method == 'previous':
-        kind = 'previous'
-    elif method == 'next':
-        kind = 'next'
-    else:
-        kind = 'linear'
-    
-    # Create interpolation functions
+def process_coordinates(coords_df, n_traces, easting_col='Easting', northing_col='Northing', 
+                       elevation_col='Elevation', trace_col=None, method='linear'):
+    """Process and interpolate coordinates to match GPR traces"""
     try:
-        f_easting = interp1d(coord_trace_indices, easting, kind=kind, fill_value='extrapolate')
-        f_northing = interp1d(coord_trace_indices, northing, kind=kind, fill_value='extrapolate')
-        f_elevation = interp1d(coord_trace_indices, elevation, kind=kind, fill_value='extrapolate')
+        # Extract data
+        easting = coords_df[easting_col].values
+        northing = coords_df[northing_col].values
+        elevation = coords_df[elevation_col].values
         
-        # Interpolate to all traces
+        # Determine x positions for coordinate points
+        if trace_col and trace_col in coords_df.columns:
+            coord_trace_indices = coords_df[trace_col].values
+        else:
+            # Use cumulative distance along profile
+            dx = np.diff(easting)
+            dy = np.diff(northing)
+            distances = np.sqrt(dx**2 + dy**2)
+            cumulative_dist = np.concatenate(([0], np.cumsum(distances)))
+            coord_trace_indices = np.linspace(0, n_traces-1, len(cumulative_dist))
+        
+        # Target trace indices
+        target_trace_indices = np.arange(n_traces)
+        
+        # Map method names
+        method_map = {
+            'linear': 'linear',
+            'cubic': 'cubic',
+            'nearest': 'nearest',
+            'previous': 'previous',
+            'next': 'next'
+        }
+        interp_kind = method_map.get(method.lower(), 'linear')
+        
+        # Create interpolation functions
+        f_easting = interp1d(coord_trace_indices, easting, kind=interp_kind, fill_value='extrapolate')
+        f_northing = interp1d(coord_trace_indices, northing, kind=interp_kind, fill_value='extrapolate')
+        f_elevation = interp1d(coord_trace_indices, elevation, kind=interp_kind, fill_value='extrapolate')
+        
+        # Interpolate
         easting_interp = f_easting(target_trace_indices)
         northing_interp = f_northing(target_trace_indices)
         elevation_interp = f_elevation(target_trace_indices)
         
-        # Calculate distance along profile (cumulative distance from start)
+        # Calculate distance along profile
         dx_interp = np.diff(easting_interp)
         dy_interp = np.diff(northing_interp)
         dist_interp = np.sqrt(dx_interp**2 + dy_interp**2)
@@ -405,14 +416,14 @@ def process_coordinates(coords_df, n_traces, trace_col=None, method='linear'):
         }
         
     except Exception as e:
-        st.error(f"Error interpolating coordinates: {str(e)}")
+        st.error(f"Error processing coordinates: {str(e)}")
         return None
 
 def scale_axes(array_shape, depth_unit, max_depth, distance_unit, total_distance, coordinates=None):
     """Create scaled axis arrays based on user input"""
     n_samples, n_traces = array_shape
     
-    # Scale Y-axis (depth/time)
+    # Scale Y-axis
     if depth_unit == "samples":
         y_axis = np.arange(n_samples)
         y_label = "Sample Number"
@@ -426,12 +437,11 @@ def scale_axes(array_shape, depth_unit, max_depth, distance_unit, total_distance
         y_axis = np.linspace(0, max_depth, n_samples)
         y_label = "Depth (ft)"
     
-    # Scale X-axis (distance)
+    # Scale X-axis
     if coordinates is not None:
-        # Use coordinate-based distance
         x_axis = coordinates['distance']
         x_label = "Distance along profile (m)"
-        distance_unit = "meters"  # Coordinates are assumed to be in meters
+        distance_unit = "meters"
         total_distance = x_axis[-1]
     elif distance_unit == "traces":
         x_axis = np.arange(n_traces)
@@ -448,7 +458,7 @@ def scale_axes(array_shape, depth_unit, max_depth, distance_unit, total_distance
     
     return x_axis, y_axis, x_label, y_label, distance_unit, total_distance
 
-def get_aspect_ratio(mode, manual_ratio=None, data_shape=None):
+def get_aspect_ratio(mode, manual_ratio=None):
     """Calculate aspect ratio based on mode"""
     if mode == "Auto":
         return "auto"
@@ -458,28 +468,49 @@ def get_aspect_ratio(mode, manual_ratio=None, data_shape=None):
         return manual_ratio
     elif mode == "Realistic" and manual_ratio is not None:
         return manual_ratio
-    elif data_shape is not None:
-        # Auto-calculate based on data dimensions
-        return data_shape[0] / data_shape[1] * 0.5  # Default aspect
     else:
         return "auto"
+
+def get_window_indices(x_axis, y_axis, depth_min, depth_max, distance_min, distance_max):
+    """Convert user-specified window coordinates to array indices"""
+    # Find depth indices
+    depth_idx_min = np.argmin(np.abs(y_axis - depth_min))
+    depth_idx_max = np.argmin(np.abs(y_axis - depth_max))
+    
+    if depth_idx_min > depth_idx_max:
+        depth_idx_min, depth_idx_max = depth_idx_max, depth_idx_min
+    
+    # Find distance indices
+    dist_idx_min = np.argmin(np.abs(x_axis - distance_min))
+    dist_idx_max = np.argmin(np.abs(x_axis - distance_max))
+    
+    if dist_idx_min > dist_idx_max:
+        dist_idx_min, dist_idx_max = dist_idx_max, dist_idx_min
+    
+    return {
+        'depth_min_idx': depth_idx_min,
+        'depth_max_idx': depth_idx_max,
+        'dist_min_idx': dist_idx_min,
+        'dist_max_idx': dist_idx_max,
+        'depth_min_val': y_axis[depth_idx_min],
+        'depth_max_val': y_axis[depth_idx_max],
+        'dist_min_val': x_axis[dist_idx_min],
+        'dist_max_val': x_axis[dist_idx_max]
+    }
 
 # Main content
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
         try:
-            # Try to import readgssi
+            # Import readgssi
             try:
                 from readgssi import readgssi
             except ImportError:
-                st.error("⚠️ readgssi not installed! Please run:")
-                st.code("pip install readgssi")
+                st.error("⚠️ readgssi not installed! Please run: pip install readgssi")
                 st.stop()
             
-            # Create progress bar
             progress_bar = st.progress(0)
             
-            # Save files to temp location
             with tempfile.TemporaryDirectory() as tmpdir:
                 progress_bar.progress(10)
                 
@@ -503,7 +534,6 @@ if dzt_file and process_btn:
                     try:
                         coords_df = pd.read_csv(coord_csv)
                         st.session_state.coordinates = coords_df
-                        st.info(f"Loaded {len(coords_df)} coordinate points")
                     except Exception as e:
                         st.warning(f"Could not read CSV coordinates: {str(e)}")
                         coord_csv = None
@@ -517,20 +547,17 @@ if dzt_file and process_btn:
                     'verbose': False
                 }
                 
-                # Add stacking
                 if stacking == "auto":
                     params['stack'] = 'auto'
                 elif stacking == "manual":
                     params['stack'] = stack_value
                 
-                # Add BGR
                 if bgr:
                     if bgr_type == "Full-width":
                         params['bgr'] = 0
                     else:
                         params['bgr'] = bgr_window
                 
-                # Add frequency filter
                 if freq_filter:
                     params['freqmin'] = freq_min
                     params['freqmax'] = freq_max
@@ -542,46 +569,36 @@ if dzt_file and process_btn:
                 
                 progress_bar.progress(70)
                 
-                # Store original array
                 if arrays and len(arrays) > 0:
                     original_array = arrays[0]
-                    
-                    # Apply time-varying gain
                     processed_array = original_array.copy()
                     
-                    # Apply selected gain
+                    # Apply gain
                     if gain_type == "Constant":
-                        processed_array = apply_gain(processed_array, "Constant", 
-                                                    const_gain=const_gain)
+                        processed_array = apply_gain(processed_array, "Constant", const_gain=const_gain)
                     elif gain_type == "Linear":
-                        processed_array = apply_gain(processed_array, "Linear",
-                                                    min_gain=min_gain, max_gain=max_gain)
+                        processed_array = apply_gain(processed_array, "Linear", min_gain=min_gain, max_gain=max_gain)
                     elif gain_type == "Exponential":
-                        processed_array = apply_gain(processed_array, "Exponential",
-                                                    base_gain=base_gain, exp_factor=exp_factor)
+                        processed_array = apply_gain(processed_array, "Exponential", base_gain=base_gain, exp_factor=exp_factor)
                     elif gain_type == "AGC (Automatic Gain Control)":
-                        processed_array = apply_gain(processed_array, "AGC (Automatic Gain Control)",
-                                                    window_size=window_size, target_amplitude=target_amplitude)
+                        processed_array = apply_gain(processed_array, "AGC (Automatic Gain Control)", window_size=window_size, target_amplitude=target_amplitude)
                     elif gain_type == "Spherical":
-                        processed_array = apply_gain(processed_array, "Spherical",
-                                                    power_gain=power_gain, attenuation=attenuation)
+                        processed_array = apply_gain(processed_array, "Spherical", power_gain=power_gain, attenuation=attenuation)
                     
                     progress_bar.progress(80)
                     
                     # Process coordinates if provided
                     if coord_csv and st.session_state.coordinates is not None:
-                        try:
-                            coordinates_data = process_coordinates(
-                                st.session_state.coordinates,
-                                processed_array.shape[1],
-                                trace_col=trace_col if 'trace_col' in locals() else None,
-                                method=interp_method.lower() if 'interp_method' in locals() else 'linear'
-                            )
-                            st.session_state.interpolated_coords = coordinates_data
-                            if coordinates_data:
-                                st.success(f"✓ Interpolated {coordinates_data['original_points']} coordinate points to {coordinates_data['interpolated_points']} traces")
-                        except Exception as e:
-                            st.warning(f"Coordinate processing failed: {str(e)}")
+                        coordinates_data = process_coordinates(
+                            st.session_state.coordinates,
+                            processed_array.shape[1],
+                            easting_col=easting_col,
+                            northing_col=northing_col,
+                            elevation_col=elevation_col,
+                            trace_col=trace_col if trace_col else None,
+                            method=interp_method.lower()
+                        )
+                        st.session_state.interpolated_coords = coordinates_data
                     
                     progress_bar.progress(90)
                     
@@ -592,11 +609,9 @@ if dzt_file and process_btn:
                     st.session_state.gps = gps
                     st.session_state.data_loaded = True
                     
-                    # Store axis scaling parameters
+                    # Store settings
                     st.session_state.depth_unit = depth_unit
                     st.session_state.max_depth = max_depth if depth_unit != "samples" else None
-                    
-                    # Store coordinate usage
                     st.session_state.use_coords_for_distance = 'use_coords_for_distance' in locals() and use_coords_for_distance
                     st.session_state.coordinates_data = coordinates_data
                     
@@ -604,7 +619,7 @@ if dzt_file and process_btn:
                         st.session_state.distance_unit = distance_unit
                         st.session_state.total_distance = total_distance if distance_unit != "traces" else None
                     else:
-                        st.session_state.distance_unit = "meters"  # Default for coordinates
+                        st.session_state.distance_unit = "meters"
                         st.session_state.total_distance = coordinates_data['distance'][-1] if coordinates_data else None
                     
                     # Store aspect ratio
@@ -624,6 +639,13 @@ if dzt_file and process_btn:
                         if not st.session_state.use_coords_for_distance:
                             st.session_state.distance_min = distance_min if 'distance_min' in locals() else 0
                             st.session_state.distance_max = distance_max if 'distance_max' in locals() else total_distance
+                        else:
+                            st.session_state.distance_min = 0
+                            st.session_state.distance_max = coordinates_data['distance'][-1] if coordinates_data else total_distance
+                    
+                    st.session_state.multiple_windows = multiple_windows
+                    if multiple_windows and use_custom_window:
+                        st.session_state.additional_windows = windows if 'windows' in locals() else []
                     
                     progress_bar.progress(100)
                     st.success("✅ Data processed successfully!")
@@ -633,7 +655,6 @@ if dzt_file and process_btn:
                     
         except Exception as e:
             st.error(f"Error processing data: {str(e)}")
-            st.code(str(e))
 
 # Display results if data is loaded
 if st.session_state.data_loaded:
@@ -644,38 +665,27 @@ if st.session_state.data_loaded:
     with tabs[0]:  # Header Info
         st.subheader("File Information & Settings")
         
-        # Display coordinate info if available
+        # Display coordinate info
         if st.session_state.interpolated_coords is not None:
             st.markdown("### Coordinate Information")
-            col1, col2, col3 = st.columns(3)
-            
+            col1, col2 = st.columns(2)
             with col1:
                 st.metric("Original Points", st.session_state.interpolated_coords['original_points'])
                 st.metric("Total Distance", f"{st.session_state.interpolated_coords['distance'][-1]:.1f} m")
-            
             with col2:
                 st.metric("Interpolated Points", st.session_state.interpolated_coords['interpolated_points'])
-                st.metric("Avg Point Spacing", 
-                         f"{st.session_state.interpolated_coords['distance'][-1]/st.session_state.interpolated_coords['original_points']:.1f} m")
-            
-            with col3:
-                st.metric("Easting Range", 
-                         f"{st.session_state.interpolated_coords['easting'].min():.1f} - {st.session_state.interpolated_coords['easting'].max():.1f}")
-                st.metric("Elevation Range", 
-                         f"{st.session_state.interpolated_coords['elevation'].min():.1f} - {st.session_state.interpolated_coords['elevation'].max():.1f}")
+                st.metric("Easting Range", f"{st.session_state.interpolated_coords['easting'].min():.1f} - {st.session_state.interpolated_coords['easting'].max():.1f}")
         
-        # Display scaling settings
+        # Display settings
         col1, col2 = st.columns(2)
-        
         with col1:
-            st.markdown("### Axis Scaling Settings")
+            st.markdown("### Axis Scaling")
             settings_data = {
                 "Y-axis (Depth)": f"{st.session_state.depth_unit}",
-                "Max Y-value": f"{st.session_state.max_depth if st.session_state.max_depth else 'Auto'}",
+                "Max Depth": f"{st.session_state.max_depth if st.session_state.max_depth else 'Auto'}",
                 "X-axis (Distance)": f"{st.session_state.distance_unit}",
-                "Total X-distance": f"{st.session_state.total_distance if st.session_state.total_distance else 'Auto'}"
+                "Total Distance": f"{st.session_state.total_distance if st.session_state.total_distance else 'Auto'}"
             }
-            
             for key, value in settings_data.items():
                 st.markdown(f"**{key}:** {value}")
             
@@ -690,44 +700,39 @@ if st.session_state.data_loaded:
                     "System": st.session_state.header.get('system', 'Unknown'),
                     "Antenna Frequency": f"{st.session_state.header.get('ant_freq', 'N/A')} MHz",
                     "Samples per Trace": st.session_state.header.get('spt', 'N/A'),
-                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A')
+                    "Number of Traces": st.session_state.header.get('ntraces', 'N/A'),
+                    "Sampling Depth": f"{st.session_state.header.get('depth', 'N/A'):.2f} m"
                 }
-                
                 for key, value in info_data.items():
                     st.markdown(f"**{key}:** {value}")
     
     with tabs[1]:  # Full View
         st.subheader("Full Radar Profile")
         
-        # Determine aspect ratio
+        # Get aspect ratio
         aspect_value = get_aspect_ratio(
             st.session_state.aspect_mode,
-            st.session_state.aspect_ratio,
-            st.session_state.processed_array.shape
+            st.session_state.aspect_ratio
         )
         
-        # Create scaled axes for full view
+        # Create scaled axes
         x_axis_full, y_axis_full, x_label_full, y_label_full, _, _ = scale_axes(
             st.session_state.processed_array.shape,
             st.session_state.depth_unit,
-            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+            st.session_state.max_depth,
             st.session_state.distance_unit,
-            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+            st.session_state.total_distance,
             coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
         )
         
         # Display options
         col1, col2, col3 = st.columns(3)
-        
         with col1:
             show_colorbar = st.checkbox("Show Colorbar", True, key="full_cbar")
             interpolation = st.selectbox("Interpolation", ["none", "bilinear", "bicubic", "gaussian"], key="full_interp")
-        
         with col2:
-            colormap = st.selectbox("Colormap", ["seismic", "RdBu", "gray", "viridis", "jet", "coolwarm"], key="full_cmap")
-            aspect_display = st.selectbox("Display Aspect", ["auto", "equal", 0.1, 0.2, 0.5, 1.0, 2.0, 5.0], 
-                                         index=0, key="full_display_aspect")
-        
+            colormap = st.selectbox("Colormap", ["seismic", "RdBu", "gray", "viridis", "jet"], key="full_cmap")
+            display_aspect = st.selectbox("Display Aspect", ["auto", "equal", 0.1, 0.2, 0.5, 1.0, 2.0, 5.0], index=0)
         with col3:
             vmin = st.number_input("Color Min", -1.0, 0.0, -0.5, 0.01, key="full_vmin")
             vmax = st.number_input("Color Max", 0.0, 1.0, 0.5, 0.01, key="full_vmax")
@@ -736,7 +741,7 @@ if st.session_state.data_loaded:
         # Create figure
         fig_full, (ax1_full, ax2_full) = plt.subplots(1, 2, figsize=(18, 8))
         
-        # Plot original full view
+        # Plot original
         if normalize_colors:
             vmax_plot = np.percentile(np.abs(st.session_state.original_array), 99)
             vmin_plot = -vmax_plot
@@ -745,110 +750,234 @@ if st.session_state.data_loaded:
         
         im1 = ax1_full.imshow(st.session_state.original_array, 
                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
-                             aspect=aspect_display, cmap=colormap, 
+                             aspect=display_aspect, cmap=colormap, 
                              vmin=vmin_plot, vmax=vmax_plot,
                              interpolation=interpolation)
-        
         ax1_full.set_xlabel(x_label_full)
         ax1_full.set_ylabel(y_label_full)
         ax1_full.set_title("Original Data - Full View")
-        ax1_full.grid(True, alpha=0.3, linestyle='--')
-        
+        ax1_full.grid(True, alpha=0.3)
         if show_colorbar:
             plt.colorbar(im1, ax=ax1_full, label='Amplitude')
         
-        # Plot processed full view
+        # Plot processed
         im2 = ax2_full.imshow(st.session_state.processed_array,
                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
-                             aspect=aspect_display, cmap=colormap,
+                             aspect=display_aspect, cmap=colormap,
                              vmin=vmin_plot, vmax=vmax_plot,
                              interpolation=interpolation)
-        
         ax2_full.set_xlabel(x_label_full)
         ax2_full.set_ylabel(y_label_full)
         ax2_full.set_title(f"Processed ({gain_type} Gain) - Full View")
-        ax2_full.grid(True, alpha=0.3, linestyle='--')
-        
+        ax2_full.grid(True, alpha=0.3)
         if show_colorbar:
             plt.colorbar(im2, ax=ax2_full, label='Amplitude')
+        
+        # Add window overlay
+        if st.session_state.use_custom_window:
+            window_info = get_window_indices(
+                x_axis_full, y_axis_full,
+                st.session_state.depth_min, st.session_state.depth_max,
+                st.session_state.distance_min, st.session_state.distance_max
+            )
+            rect = plt.Rectangle((window_info['dist_min_val'], window_info['depth_min_val']),
+                               window_info['dist_max_val'] - window_info['dist_min_val'],
+                               window_info['depth_max_val'] - window_info['depth_min_val'],
+                               linewidth=2, edgecolor='yellow', facecolor='none', alpha=0.8)
+            ax1_full.add_patch(rect.copy())
+            ax2_full.add_patch(rect.copy())
         
         plt.tight_layout()
         st.pyplot(fig_full)
         
-        # Display aspect ratio info
-        st.info(f"**Aspect Ratio:** {aspect_value} | **Plot Dimensions:** {st.session_state.processed_array.shape[1]} × {st.session_state.processed_array.shape[0]} | **Y:X Scale:** {y_axis_full[-1]/x_axis_full[-1]:.3f}")
+        # Display aspect info
+        st.info(f"**Aspect Ratio:** {aspect_value} | **Dimensions:** {st.session_state.processed_array.shape[1]} × {st.session_state.processed_array.shape[0]}")
     
     with tabs[2]:  # Custom Window
         st.subheader("Custom Window Analysis")
         
         if not st.session_state.use_custom_window:
-            st.warning("⚠️ Enable 'Use Custom Plot Window' in the sidebar to use this feature.")
+            st.warning("Enable 'Use Custom Plot Window' in sidebar")
         else:
             # Create scaled axes
             x_axis, y_axis, x_label, y_label, _, _ = scale_axes(
                 st.session_state.processed_array.shape,
                 st.session_state.depth_unit,
-                st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+                st.session_state.max_depth,
                 st.session_state.distance_unit,
-                st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+                st.session_state.total_distance,
                 coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
             )
             
-            # Window functionality continues as before...
-            # [Previous window code remains the same]
-            st.info("Window functionality available - code continues from previous version")
+            # Get window indices
+            window_info = get_window_indices(
+                x_axis, y_axis,
+                st.session_state.depth_min, st.session_state.depth_max,
+                st.session_state.distance_min, st.session_state.distance_max
+            )
+            
+            # Extract window data
+            window_data = st.session_state.processed_array[
+                window_info['depth_min_idx']:window_info['depth_max_idx'],
+                window_info['dist_min_idx']:window_info['dist_max_idx']
+            ]
+            
+            window_data_original = st.session_state.original_array[
+                window_info['depth_min_idx']:window_info['depth_max_idx'],
+                window_info['dist_min_idx']:window_info['dist_max_idx']
+            ]
+            
+            x_axis_window = x_axis[window_info['dist_min_idx']:window_info['dist_max_idx']]
+            y_axis_window = y_axis[window_info['depth_min_idx']:window_info['depth_max_idx']]
+            
+            # Display window stats
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Depth Range", f"{window_info['depth_min_val']:.1f} - {window_info['depth_max_val']:.1f} {st.session_state.depth_unit}")
+            with col2:
+                st.metric("Distance Range", f"{window_info['dist_min_val']:.1f} - {window_info['dist_max_val']:.1f} {st.session_state.distance_unit}")
+            with col3:
+                st.metric("Window Size", f"{window_data.shape[0]} × {window_data.shape[1]}")
+            with col4:
+                st.metric("Data Points", f"{window_data.size:,}")
+            
+            # Plot windowed data
+            fig_window, (ax1_window, ax2_window) = plt.subplots(1, 2, figsize=(16, 6))
+            
+            aspect_window = get_aspect_ratio(st.session_state.aspect_mode, st.session_state.aspect_ratio)
+            
+            im1_window = ax1_window.imshow(window_data_original,
+                                          extent=[x_axis_window[0], x_axis_window[-1], 
+                                                  y_axis_window[-1], y_axis_window[0]],
+                                          aspect=aspect_window, cmap='seismic')
+            ax1_window.set_xlabel(x_label)
+            ax1_window.set_ylabel(y_label)
+            ax1_window.set_title(f"Original - Custom Window")
+            ax1_window.grid(True, alpha=0.3)
+            plt.colorbar(im1_window, ax=ax1_window, label='Amplitude')
+            
+            im2_window = ax2_window.imshow(window_data,
+                                          extent=[x_axis_window[0], x_axis_window[-1], 
+                                                  y_axis_window[-1], y_axis_window[0]],
+                                          aspect=aspect_window, cmap='seismic')
+            ax2_window.set_xlabel(x_label)
+            ax2_window.set_ylabel(y_label)
+            ax2_window.set_title(f"Processed - Custom Window")
+            ax2_window.grid(True, alpha=0.3)
+            plt.colorbar(im2_window, ax=ax2_window, label='Amplitude')
+            
+            plt.tight_layout()
+            st.pyplot(fig_window)
+            
+            # Multiple windows
+            if st.session_state.multiple_windows and hasattr(st.session_state, 'additional_windows'):
+                st.subheader("Multiple Windows View")
+                num_windows_total = 1 + len(st.session_state.additional_windows)
+                cols = min(2, num_windows_total)
+                rows = (num_windows_total + cols - 1) // cols
+                
+                fig_multi, axes = plt.subplots(rows, cols, figsize=(cols*8, rows*6))
+                if rows * cols == 1:
+                    axes = np.array([[axes]])
+                elif rows == 1:
+                    axes = axes.reshape(1, -1)
+                elif cols == 1:
+                    axes = axes.reshape(-1, 1)
+                
+                # Plot main window
+                ax = axes[0, 0]
+                im = ax.imshow(window_data,
+                             extent=[x_axis_window[0], x_axis_window[-1], 
+                                     y_axis_window[-1], y_axis_window[0]],
+                             aspect=aspect_window, cmap='seismic')
+                ax.set_xlabel(x_label)
+                ax.set_ylabel(y_label)
+                ax.set_title(f"Window 1")
+                ax.grid(True, alpha=0.3)
+                plt.colorbar(im, ax=ax, label='Amplitude')
+                
+                # Plot additional windows
+                window_idx = 1
+                for i in range(rows):
+                    for j in range(cols):
+                        if window_idx >= num_windows_total:
+                            if i == 0 and j == 0:
+                                continue
+                            axes[i, j].axis('off')
+                            continue
+                        
+                        if window_idx == 0:
+                            continue
+                        
+                        ax = axes[i, j]
+                        win = st.session_state.additional_windows[window_idx-1]
+                        
+                        win_info = get_window_indices(
+                            x_axis, y_axis,
+                            win['depth_min'], win['depth_max'],
+                            win['distance_min'], win['distance_max']
+                        )
+                        
+                        win_data = st.session_state.processed_array[
+                            win_info['depth_min_idx']:win_info['depth_max_idx'],
+                            win_info['dist_min_idx']:win_info['dist_max_idx']
+                        ]
+                        
+                        x_axis_win = x_axis[win_info['dist_min_idx']:win_info['dist_max_idx']]
+                        y_axis_win = y_axis[win_info['depth_min_idx']:win_info['depth_max_idx']]
+                        
+                        im = ax.imshow(win_data,
+                                     extent=[x_axis_win[0], x_axis_win[-1], 
+                                             y_axis_win[-1], y_axis_win[0]],
+                                     aspect=aspect_window, cmap='seismic')
+                        ax.set_xlabel(x_label)
+                        ax.set_ylabel(y_label)
+                        ax.set_title(f"Window {window_idx+1}")
+                        ax.grid(True, alpha=0.3)
+                        plt.colorbar(im, ax=ax, label='Amplitude')
+                        
+                        window_idx += 1
+                
+                plt.tight_layout()
+                st.pyplot(fig_multi)
     
     with tabs[3]:  # Coordinate View
         st.subheader("Coordinate-Based Visualization")
         
         if st.session_state.interpolated_coords is None:
-            st.warning("No coordinates imported. Upload a CSV with Easting, Northing, Elevation columns.")
+            st.warning("No coordinates imported")
         else:
-            # Display coordinate statistics
+            # Display coordinate stats
             col1, col2, col3, col4 = st.columns(4)
-            
             with col1:
                 st.metric("Profile Length", f"{st.session_state.interpolated_coords['distance'][-1]:.1f} m")
-                st.metric("Elevation Change", 
-                         f"{st.session_state.interpolated_coords['elevation'].max() - st.session_state.interpolated_coords['elevation'].min():.1f} m")
-            
             with col2:
-        
-                st.metric("Easting Range", 
-                          f"{np.ptp(st.session_state.interpolated_coords['easting']):.1f} m")
-                st.metric("Northing Range", 
-                          f"{np.ptp(st.session_state.interpolated_coords['northing']):.1f} m")
+                st.metric("Elevation Change", f"{st.session_state.interpolated_coords['elevation'].max() - st.session_state.interpolated_coords['elevation'].min():.1f} m")
             with col3:
-                avg_spacing = np.mean(np.diff(st.session_state.interpolated_coords['distance']))
-                st.metric("Avg Trace Spacing", f"{avg_spacing:.2f} m")
-                st.metric("Profile Bearing", 
-                         f"{np.degrees(np.arctan2(st.session_state.interpolated_coords['northing'][-1] - st.session_state.interpolated_coords['northing'][0], 
-                                                  st.session_state.interpolated_coords['easting'][-1] - st.session_state.interpolated_coords['easting'][0])):.1f}°")
-            
+                st.metric("Easting Range", f"{np.ptp(st.session_state.interpolated_coords['easting']):.1f} m")
+
             with col4:
-                slope = (st.session_state.interpolated_coords['elevation'][-1] - st.session_state.interpolated_coords['elevation'][0]) / st.session_state.interpolated_coords['distance'][-1]
-                st.metric("Average Slope", f"{slope*100:.1f}%")
-                st.metric("Data Points", f"{len(st.session_state.interpolated_coords['easting'])}")
+                st.metric("Northing Range", f"{np.ptp(st.session_state.interpolated_coords['northing']):.1f} m")
             
             # Create coordinate visualizations
             fig_coords, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
             
-            # 1. Plan view (Easting vs Northing)
+            # Plan view
             ax1.plot(st.session_state.interpolated_coords['easting'], 
                     st.session_state.interpolated_coords['northing'], 
                     'b-', linewidth=1, alpha=0.7)
-            ax1.scatter(st.session_state.interpolated_coords['easting'], 
-                       st.session_state.interpolated_coords['northing'], 
-                       c=st.session_state.interpolated_coords['distance'], 
-                       cmap='viridis', s=20, alpha=0.8)
+            scatter1 = ax1.scatter(st.session_state.interpolated_coords['easting'], 
+                                 st.session_state.interpolated_coords['northing'], 
+                                 c=st.session_state.interpolated_coords['distance'], 
+                                 cmap='viridis', s=20, alpha=0.8)
             ax1.set_xlabel('Easting (m)')
             ax1.set_ylabel('Northing (m)')
             ax1.set_title('Plan View - Survey Line')
             ax1.grid(True, alpha=0.3)
             ax1.axis('equal')
-            plt.colorbar(ax1.collections[0], ax=ax1, label='Distance along profile (m)')
+            plt.colorbar(scatter1, ax=ax1, label='Distance (m)')
             
-            # 2. Elevation profile
+            # Elevation profile
             ax2.plot(st.session_state.interpolated_coords['distance'], 
                     st.session_state.interpolated_coords['elevation'], 
                     'g-', linewidth=2, alpha=0.8)
@@ -856,19 +985,19 @@ if st.session_state.data_loaded:
                             st.session_state.interpolated_coords['elevation'].min(),
                             st.session_state.interpolated_coords['elevation'],
                             alpha=0.3, color='green')
-            ax2.set_xlabel('Distance along profile (m)')
+            ax2.set_xlabel('Distance (m)')
             ax2.set_ylabel('Elevation (m)')
             ax2.set_title('Elevation Profile')
             ax2.grid(True, alpha=0.3)
             
-            # 3. 3D view of survey line
+            # 3D view
             from mpl_toolkits.mplot3d import Axes3D
             ax3 = fig_coords.add_subplot(2, 2, 3, projection='3d')
             ax3.plot(st.session_state.interpolated_coords['easting'],
                     st.session_state.interpolated_coords['northing'],
                     st.session_state.interpolated_coords['elevation'],
                     'b-', linewidth=1, alpha=0.7)
-            scatter = ax3.scatter(st.session_state.interpolated_coords['easting'],
+            scatter3 = ax3.scatter(st.session_state.interpolated_coords['easting'],
                                  st.session_state.interpolated_coords['northing'],
                                  st.session_state.interpolated_coords['elevation'],
                                  c=st.session_state.interpolated_coords['distance'],
@@ -877,92 +1006,257 @@ if st.session_state.data_loaded:
             ax3.set_ylabel('Northing (m)')
             ax3.set_zlabel('Elevation (m)')
             ax3.set_title('3D Survey Line')
-            plt.colorbar(scatter, ax=ax3, label='Distance (m)')
+            plt.colorbar(scatter3, ax=ax3, label='Distance (m)')
             
-            # 4. GPR data with coordinate-based X-axis
-            # Determine aspect ratio for this plot
-            aspect_value_coords = get_aspect_ratio(
-                st.session_state.aspect_mode,
-                st.session_state.aspect_ratio,
-                st.session_state.processed_array.shape
-            )
+            # GPR with coordinate-based X-axis
+            aspect_value_coords = get_aspect_ratio(st.session_state.aspect_mode, st.session_state.aspect_ratio)
             
-            # Create depth axis
             if st.session_state.depth_unit != "samples":
                 depth_axis = np.linspace(0, st.session_state.max_depth, 
                                         st.session_state.processed_array.shape[0])
             else:
                 depth_axis = np.arange(st.session_state.processed_array.shape[0])
             
-            # Plot GPR data with coordinate-based distance
-            im = ax4.imshow(st.session_state.processed_array,
+            im4 = ax4.imshow(st.session_state.processed_array,
                           extent=[st.session_state.interpolated_coords['distance'][0],
                                  st.session_state.interpolated_coords['distance'][-1],
                                  depth_axis[-1], depth_axis[0]],
                           aspect=aspect_value_coords, cmap='seismic', alpha=0.9)
-            ax4.set_xlabel('Distance along profile (m)')
+            ax4.set_xlabel('Distance (m)')
             ax4.set_ylabel(f'Depth ({st.session_state.depth_unit})')
-            ax4.set_title(f'GPR Data with Coordinate Scaling (Aspect: {aspect_value_coords})')
+            ax4.set_title(f'GPR Data with Coordinate Scaling')
             ax4.grid(True, alpha=0.2)
-            plt.colorbar(im, ax=ax4, label='Amplitude')
-            
-            # Overlay elevation profile on GPR plot (secondary axis)
-            ax4_twin = ax4.twinx()
-            ax4_twin.plot(st.session_state.interpolated_coords['distance'],
-                         st.session_state.interpolated_coords['elevation'],
-                         'g-', linewidth=2, alpha=0.6, label='Elevation')
-            ax4_twin.set_ylabel('Elevation (m)', color='green')
-            ax4_twin.tick_params(axis='y', labelcolor='green')
+            plt.colorbar(im4, ax=ax4, label='Amplitude')
             
             plt.tight_layout()
             st.pyplot(fig_coords)
+    
+    with tabs[4]:  # FFT Analysis
+        st.subheader("Frequency vs Amplitude Analysis (FFT)")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            trace_for_fft = st.slider("Select Trace for FFT", 
+                                     0, st.session_state.processed_array.shape[1]-1, 
+                                     st.session_state.processed_array.shape[1]//2,
+                                     key="fft_trace")
+        with col2:
+            sampling_rate = st.number_input("Sampling Rate (MHz)", 100, 5000, 1000, 100,
+                                           help="Antenna sampling rate in MHz",
+                                           key="fft_sampling")
+        with col3:
+            fft_mode = st.selectbox("FFT Mode", ["Single Trace", "Average of All Traces", "Trace Range"],
+                                   key="fft_mode")
+        
+        if fft_mode == "Trace Range":
+            trace_start = st.number_input("Start Trace", 0, st.session_state.processed_array.shape[1]-1, 0,
+                                         key="fft_start")
+            trace_end = st.number_input("End Trace", 0, st.session_state.processed_array.shape[1]-1, 
+                                       st.session_state.processed_array.shape[1]-1,
+                                       key="fft_end")
+        
+        # Calculate FFT
+        if fft_mode == "Single Trace":
+            trace_data = st.session_state.processed_array[:, trace_for_fft]
+            freq, amplitude = calculate_fft(trace_data, sampling_rate)
+            title = f"FFT - Trace {trace_for_fft}"
+        elif fft_mode == "Average of All Traces":
+            avg_trace = np.mean(st.session_state.processed_array, axis=1)
+            freq, amplitude = calculate_fft(avg_trace, sampling_rate)
+            title = "FFT - Average of All Traces"
+        elif fft_mode == "Trace Range":
+            avg_trace = np.mean(st.session_state.processed_array[:, trace_start:trace_end+1], axis=1)
+            freq, amplitude = calculate_fft(avg_trace, sampling_rate)
+            title = f"FFT - Traces {trace_start} to {trace_end}"
+        else:
+            freq, amplitude = [], []
+            title = ""
+        
+        if len(freq) > 0:
+            fig_fft, (ax_fft1, ax_fft2) = plt.subplots(1, 2, figsize=(16, 6))
             
-            # Coordinate-based GPR with elevation adjustment
-            st.subheader("Elevation-Adjusted GPR Display")
+            ax_fft1.plot(freq, amplitude, 'b-', linewidth=2, alpha=0.8)
+            ax_fft1.fill_between(freq, 0, amplitude, alpha=0.3, color='blue')
+            ax_fft1.set_xlabel("Frequency (MHz)")
+            ax_fft1.set_ylabel("Amplitude")
+            ax_fft1.set_title(f"{title} - Linear Scale")
+            ax_fft1.grid(True, alpha=0.3)
+            ax_fft1.set_xlim([0, sampling_rate/2])
             
-            # Calculate elevation-adjusted depth
-            # For each trace, adjust depth based on surface elevation
-            n_traces = st.session_state.processed_array.shape[1]
-            n_samples = st.session_state.processed_array.shape[0]
-            
-            # Create meshgrid for pcolormesh
-            X, Y = np.meshgrid(st.session_state.interpolated_coords['distance'], depth_axis)
-            
-            # Adjust Y coordinates by elevation (convert depth to elevation)
-            Y_elev = np.zeros_like(Y)
-            for i in range(n_traces):
-                Y_elev[:, i] = st.session_state.interpolated_coords['elevation'][i] - depth_axis
-            
-            fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
-            
-            # Use pcolormesh for elevation-adjusted display
-            mesh = ax_elev.pcolormesh(X, Y_elev, st.session_state.processed_array,
-                                     cmap='seismic', shading='auto', alpha=0.9)
-            
-            ax_elev.set_xlabel('Distance along profile (m)')
-            ax_elev.set_ylabel('Elevation (m)')
-            ax_elev.set_title('GPR Data with Elevation Adjustment')
-            ax_elev.grid(True, alpha=0.2)
-            plt.colorbar(mesh, ax=ax_elev, label='Amplitude')
-            
-            # Add topographic surface line
-            ax_elev.plot(st.session_state.interpolated_coords['distance'],
-                        st.session_state.interpolated_coords['elevation'],
-                        'k-', linewidth=2, alpha=0.8, label='Surface')
-            ax_elev.fill_between(st.session_state.interpolated_coords['distance'],
-                                Y_elev.min(), st.session_state.interpolated_coords['elevation'],
-                                alpha=0.1, color='gray')
-            
-            ax_elev.legend()
-            ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
+            ax_fft2.semilogy(freq, amplitude, 'r-', linewidth=2, alpha=0.8)
+            ax_fft2.fill_between(freq, 0.001, amplitude, alpha=0.3, color='red')
+            ax_fft2.set_xlabel("Frequency (MHz)")
+            ax_fft2.set_ylabel("Amplitude (log)")
+            ax_fft2.set_title(f"{title} - Log Scale")
+            ax_fft2.grid(True, alpha=0.3)
+            ax_fft2.set_xlim([0, sampling_rate/2])
             
             plt.tight_layout()
-            st.pyplot(fig_elev)
+            st.pyplot(fig_fft)
             
-            # Export coordinates
-            st.subheader("Export Interpolated Coordinates")
+            # FFT statistics
+            peak_idx = np.argmax(amplitude)
+            peak_freq = freq[peak_idx]
+            peak_amp = amplitude[peak_idx]
             
-            if st.button("💾 Download Interpolated Coordinates", use_container_width=True):
+            max_amp = np.max(amplitude)
+            half_power = max_amp / np.sqrt(2)
+            mask = amplitude >= half_power
+            
+            if np.any(mask):
+                low_freq = freq[mask][0]
+                high_freq = freq[mask][-1]
+                bandwidth = high_freq - low_freq
+            else:
+                low_freq = high_freq = bandwidth = 0
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Peak Frequency", f"{peak_freq:.1f} MHz")
+            with col2:
+                st.metric("Peak Amplitude", f"{peak_amp:.3e}")
+            with col3:
+                st.metric("Bandwidth (-3dB)", f"{bandwidth:.1f} MHz")
+            with col4:
+                st.metric("Center Freq", f"{(low_freq + high_freq)/2:.1f} MHz")
+    
+    with tabs[5]:  # Gain Analysis
+        st.subheader("Gain Analysis")
+        
+        n_samples = st.session_state.original_array.shape[0]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            gain_profile = np.zeros(n_samples)
+            for i in range(n_samples):
+                orig_slice = st.session_state.original_array[i, :]
+                proc_slice = st.session_state.processed_array[i, :]
+                mask = np.abs(orig_slice) > 1e-10
+                if np.any(mask):
+                    gains = np.abs(proc_slice[mask]) / np.abs(orig_slice[mask])
+                    gain_profile[i] = np.median(gains)
+                else:
+                    gain_profile[i] = 1.0
+        
+        y_axis_analysis, _, _, y_label_analysis = scale_axes(
+            (n_samples, 1),
+            st.session_state.depth_unit,
+            st.session_state.max_depth,
+            "traces",
+            None
+        )
+        
+        fig_gain, ax_gain = plt.subplots(figsize=(10, 6))
+        ax_gain.plot(gain_profile, y_axis_analysis, 'b-', linewidth=2, label='Gain Factor')
+        ax_gain.fill_betweenx(y_axis_analysis, 1, gain_profile, alpha=0.3, color='blue')
+        ax_gain.set_xlabel("Gain Factor (multiplier)")
+        ax_gain.set_ylabel(y_label_analysis)
+        ax_gain.set_title("Gain Applied vs Depth")
+        ax_gain.grid(True, alpha=0.3)
+        ax_gain.legend()
+        ax_gain.invert_yaxis()
+        
+        st.pyplot(fig_gain)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Min Gain", f"{gain_profile.min():.2f}x")
+        with col2:
+            st.metric("Max Gain", f"{gain_profile.max():.2f}x")
+        with col3:
+            st.metric("Mean Gain", f"{gain_profile.mean():.2f}x")
+    
+    with tabs[6]:  # Export
+        st.subheader("Export Processed Data")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("💾 Save Full Image", use_container_width=True):
+                x_axis_export, y_axis_export, x_label_export, y_label_export, _, _ = scale_axes(
+                    st.session_state.processed_array.shape,
+                    st.session_state.depth_unit,
+                    st.session_state.max_depth,
+                    st.session_state.distance_unit,
+                    st.session_state.total_distance,
+                    coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+                )
+                
+                fig, ax = plt.subplots(figsize=(12, 8))
+                im = ax.imshow(st.session_state.processed_array,
+                             extent=[x_axis_export[0], x_axis_export[-1], 
+                                    y_axis_export[-1], y_axis_export[0]],
+                             aspect='auto', cmap='seismic')
+                ax.set_xlabel(x_label_export)
+                ax.set_ylabel(y_label_export)
+                ax.set_title(f"GPR Data - {gain_type} Gain")
+                plt.colorbar(im, ax=ax, label='Amplitude')
+                plt.tight_layout()
+                plt.savefig("gpr_data_full.png", dpi=300, bbox_inches='tight')
+                st.success("Saved as 'gpr_data_full.png'")
+        
+        with col2:
+            if st.session_state.use_custom_window:
+                if st.button("💾 Save Window Image", use_container_width=True):
+                    x_axis, y_axis, x_label, y_label, _, _ = scale_axes(
+                        st.session_state.processed_array.shape,
+                        st.session_state.depth_unit,
+                        st.session_state.max_depth,
+                        st.session_state.distance_unit,
+                        st.session_state.total_distance,
+                        coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+                    )
+                    
+                    window_info = get_window_indices(
+                        x_axis, y_axis,
+                        st.session_state.depth_min, st.session_state.depth_max,
+                        st.session_state.distance_min, st.session_state.distance_max
+                    )
+                    
+                    window_data = st.session_state.processed_array[
+                        window_info['depth_min_idx']:window_info['depth_max_idx'],
+                        window_info['dist_min_idx']:window_info['dist_max_idx']
+                    ]
+                    
+                    x_axis_window = x_axis[window_info['dist_min_idx']:window_info['dist_max_idx']]
+                    y_axis_window = y_axis[window_info['depth_min_idx']:window_info['depth_max_idx']]
+                    
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    im = ax.imshow(window_data,
+                                 extent=[x_axis_window[0], x_axis_window[-1], 
+                                         y_axis_window[-1], y_axis_window[0]],
+                                 aspect='auto', cmap='seismic')
+                    ax.set_xlabel(x_label)
+                    ax.set_ylabel(y_label)
+                    ax.set_title(f"GPR Data - Custom Window")
+                    plt.colorbar(im, ax=ax, label='Amplitude')
+                    plt.tight_layout()
+                    plt.savefig("gpr_data_windowed.png", dpi=300, bbox_inches='tight')
+                    st.success("Saved as 'gpr_data_windowed.png'")
+        
+        with col3:
+            # Export CSV
+            x_axis_csv, _, _, _, _, _ = scale_axes(
+                st.session_state.processed_array.shape,
+                st.session_state.depth_unit,
+                st.session_state.max_depth,
+                st.session_state.distance_unit,
+                st.session_state.total_distance,
+                coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+            )
+            
+            csv_data = pd.DataFrame(st.session_state.processed_array, 
+                                  columns=[f"{xi:.2f}" for xi in x_axis_csv])
+            csv_string = csv_data.to_csv(index=False)
+            
+            st.download_button(
+                label="📥 Download Full CSV",
+                data=csv_string,
+                file_name="gpr_data_full.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        with col4:
+            if st.session_state.interpolated_coords is not None:
                 coord_df = pd.DataFrame({
                     'Trace_Index': st.session_state.interpolated_coords['trace_indices'],
                     'Distance_m': st.session_state.interpolated_coords['distance'],
@@ -970,26 +1264,15 @@ if st.session_state.data_loaded:
                     'Northing_m': st.session_state.interpolated_coords['northing'],
                     'Elevation_m': st.session_state.interpolated_coords['elevation']
                 })
-                csv = coord_df.to_csv(index=False)
+                coord_csv = coord_df.to_csv(index=False)
+                
                 st.download_button(
-                    label="📥 Download as CSV",
-                    data=csv,
+                    label="📥 Download Coordinates",
+                    data=coord_csv,
                     file_name="interpolated_coordinates.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
-    
-    # Continue with other tabs (FFT Analysis, Gain Analysis, Export)
-    # [Previous tab code remains the same for tabs 4, 5, 6]
-    
-    with tabs[4]:  # FFT Analysis
-        st.info("FFT Analysis tab - code from previous version")
-    
-    with tabs[5]:  # Gain Analysis
-        st.info("Gain Analysis tab - code from previous version")
-    
-    with tabs[6]:  # Export
-        st.info("Export tab - code from previous version")
 
 # Initial state message
 elif not dzt_file:
@@ -998,38 +1281,31 @@ elif not dzt_file:
         st.info("""
         👈 **Upload a DZT file to begin processing**
         
-        **New Coordinate Features:**
-        1. **CSV Coordinate Import:** Upload CSV with Easting, Northing, Elevation
-        2. **Automatic Interpolation:** Interpolates coordinates to match GPR traces
-        3. **Aspect Ratio Control:** Adjust Y:X scale for realistic visualization
-        4. **Coordinate-Based Visualization:** Plan view, elevation profile, 3D view
+        **Features included:**
+        1. **Coordinate Import:** CSV with Easting, Northing, Elevation
+        2. **Aspect Ratio Control:** Y:X scaling (1:1 to 1:50)
+        3. **Custom Windowing:** Zoom to specific depth/distance ranges
+        4. **Multiple Windows:** Compare different areas
+        5. **FFT Analysis:** Frequency vs amplitude
+        6. **Gain Control:** Time-varying gain for deep signals
         
-        **Coordinate CSV Format:**
+        **Coordinate CSV Example:**
         ```
         Easting, Northing, Elevation
-        100.5, 200.3, 50.2
-        101.0, 201.0, 50.1
-        101.5, 201.7, 50.0
+        100.0, 200.0, 50.0
+        101.0, 201.0, 49.8
         ...
         ```
         
-        **Aspect Ratio Examples:**
-        - 1:1 (Square)
-        - 1:10 (Standard GPR display)
-        - 1:50 (Very stretched for deep investigations)
-        - Auto (Matplotlib default)
-        
-        **Realistic Display:** Choose aspect ratios that match your survey conditions!
+        **All features integrated in one powerful app!**
         """)
 
 # Footer
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "📡 <b>GPR Data Processor v5.0</b> | Coordinate Import & Aspect Control | "
+    "📡 <b>Advanced GPR Data Processor v6.0</b> | Integrated Features | "
     "Built with Streamlit & readgssi"
     "</div>",
     unsafe_allow_html=True
 )
-
-
