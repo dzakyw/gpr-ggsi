@@ -797,7 +797,7 @@ if st.session_state.data_loaded:
             window_info = get_window_indices(
                 x_axis, y_axis,
                 st.session_state.depth_min, st.session_state.depth_max,
-                st.session_state.distance_min, st.session_state.distance_max
+                st.session_state.distance_min, st.session_state.distance_max,_,_
             )
             
             # Extract windowed data
@@ -1559,6 +1559,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
