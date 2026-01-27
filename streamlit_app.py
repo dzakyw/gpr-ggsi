@@ -908,7 +908,7 @@ if st.session_state.data_loaded:
                           extent=[st.session_state.interpolated_coords['distance'][0],
                                  st.session_state.interpolated_coords['distance'][-1],
                                  depth_axis[-1], depth_axis[0]],
-                          aspect=aspect_value_coords, cmap='seismic', alpha=0.9)
+                          aspect=aspect_value_coords, cmap='gray', alpha=0.9)
             ax4.set_xlabel('Distance along profile (m)')
             ax4.set_ylabel(f'Depth ({st.session_state.depth_unit})')
             ax4.set_title(f'GPR Data with Coordinate Scaling (Aspect: {aspect_value_coords})')
@@ -1040,5 +1040,6 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
