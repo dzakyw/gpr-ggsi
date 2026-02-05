@@ -1415,7 +1415,7 @@ if st.session_state.data_loaded:
             # Use pcolormesh for elevation-adjusted display
             mesh = ax_elev.pcolormesh(X, Y_elev, st.session_state.processed_array,
                                       vmin=vmin_plot, vmax=vmax_plot,
-                                     cmap='seismic', shading='auto', alpha=0.3)
+                                     cmap='seismic', shading='auto', alpha=0.9)
             
         
             ax_elev.set_xlabel('Distance along profile (m)')
@@ -1827,5 +1827,6 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
