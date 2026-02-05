@@ -757,13 +757,28 @@ if dzt_file and process_btn:
                         st.session_state.correction_type = correction_type
                         st.session_state.correction_depth = correction_depth
                         
+                        # Prepare correction parameters dictionary
+                        correction_params = {}
+                        if correction_type == "Linear Reduction":
+                            correction_params['surface_reduction'] = surface_reduction
+                            correction_params['depth_factor'] = depth_factor
+                        elif correction_type == "Exponential Reduction":
+                            correction_params['exp_factor'] = exp_factor
+                            correction_params['max_reduction'] = max_reduction
+                        elif correction_type == "Gaussian Filter":
+                            correction_params['filter_sigma'] = filter_sigma
+                            correction_params['filter_window'] = filter_window
+                        elif correction_type == "Windowed Normalization":
+                            correction_params['window_size'] = window_size
+                            correction_params['target_amplitude'] = target_amplitude
+                        
                         # Apply the correction
                         processed_array = apply_near_surface_correction(
                             processed_array, 
                             correction_type, 
                             correction_depth, 
                             max_depth if depth_unit != "samples" else None,
-                            **locals()
+                            **correction_params
                         )
                     
                     # Apply selected gain
@@ -1510,7 +1525,10 @@ if st.session_state.data_loaded:
             avg_trace = np.mean(windowed_traces, axis=1)
             freq, amplitude = calculate_fft(avg_trace, sampling_rate)
             title = f"FFT - Windowed Traces ({window_info['dist_min_idx']} to {window_info['dist_max_idx']})"
-        
+        elif fft_mode == "Windowed Traces" and not st.session_state.use_custom_window:
+            st.warning("Please enable 'Use Custom Plot Window' in the sidebar to use Windowed Traces mode.")
+            freq, amplitude = [], []
+            title = ""
         else:
             st.warning("Please select a valid FFT mode")
             freq, amplitude = [], []
