@@ -13,9 +13,12 @@ import tempfile
 import os
 from pathlib import Path
 import warnings
+import json
 from scipy import signal
 from scipy.fft import fft, fftfreq, fftshift
 from scipy.interpolate import interp1d, griddata
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -67,6 +70,13 @@ st.markdown("""
         padding: 15px;
         margin: 10px 0;
         border-left: 4px solid #FF9800;
+    }
+    .mute-box {
+        background-color: #fff0f0;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+        border-left: 4px solid #FF5252;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -227,6 +237,96 @@ with st.sidebar:
                 'distance_max': dist_max,
                 'color': f'C{i+1}'
             })
+    
+    st.markdown("---")
+    st.header("🔄 Line Adjustment & Muting")
+    
+    # Line reversal option
+    reverse_line = st.checkbox("Reverse Line Direction (A→B to B→A)", False,
+                              help="Reverse the order of traces to flip survey direction")
+    
+    # Trace muting option
+    mute_traces = st.checkbox("Mute Traces", False,
+                             help="Mute (set to zero) specific trace ranges")
+    
+    if mute_traces:
+        st.markdown('<div class="mute-box">', unsafe_allow_html=True)
+        st.subheader("Trace Muting Settings")
+        
+        # Muting method selection
+        mute_method = st.selectbox("Mute Method", 
+                                  ["By Distance", "By Trace Index", "Multiple Zones"],
+                                  help="Choose how to define mute zones")
+        
+        if mute_method == "By Distance":
+            col1, col2 = st.columns(2)
+            with col1:
+                mute_start_dist = st.number_input("Mute Start Distance", 0.0, 10000.0, 2.0, 0.1,
+                                                 help="Start distance for muting")
+            with col2:
+                mute_end_dist = st.number_input("Mute End Distance", 0.0, 10000.0, 6.0, 0.1,
+                                               help="End distance for muting")
+            
+            # Taper options for smoother transitions
+            apply_taper = st.checkbox("Apply Taper to Mute Zone", True,
+                                     help="Gradually fade in/out muting for smoother transitions")
+            if apply_taper:
+                taper_length = st.slider("Taper Length (% of zone)", 1, 50, 10, 1,
+                                        help="Percentage of mute zone to apply gradual taper")
+        
+        elif mute_method == "By Trace Index":
+            col1, col2 = st.columns(2)
+            with col1:
+                mute_start_idx = st.number_input("Mute Start Trace", 0, 10000, 100,
+                                                help="Start trace index for muting")
+            with col2:
+                mute_end_idx = st.number_input("Mute End Trace", 0, 10000, 200,
+                                              help="End trace index for muting")
+            
+            # Taper options
+            apply_taper = st.checkbox("Apply Taper to Mute Zone", True,
+                                     help="Gradually fade in/out muting for smoother transitions")
+            if apply_taper:
+                taper_samples = st.slider("Taper Samples", 1, 100, 10, 1,
+                                         help="Number of samples for gradual taper")
+        
+        elif mute_method == "Multiple Zones":
+            num_zones = st.number_input("Number of Mute Zones", 1, 5, 1)
+            
+            mute_zones = []
+            for i in range(num_zones):
+                st.markdown(f"**Mute Zone {i+1}**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    zone_method = st.selectbox(f"Zone {i+1} Method", ["By Distance", "By Trace Index"])
+                    if zone_method == "By Distance":
+                        zone_start = st.number_input(f"Zone {i+1} Start", 0.0, 10000.0, 10.0 + i*10, 0.1)
+                        zone_end = st.number_input(f"Zone {i+1} End", 0.0, 10000.0, 15.0 + i*10, 0.1)
+                    else:
+                        zone_start = st.number_input(f"Zone {i+1} Start Trace", 0, 10000, 150 + i*50)
+                        zone_end = st.number_input(f"Zone {i+1} End Trace", 0, 10000, 200 + i*50)
+                
+                with col2:
+                    zone_taper = st.checkbox(f"Taper Zone {i+1}", True)
+                    zone_label = st.text_input(f"Zone {i+1} Label", f"Zone {i+1}")
+                
+                mute_zones.append({
+                    'method': zone_method,
+                    'start': zone_start,
+                    'end': zone_end,
+                    'taper': zone_taper,
+                    'label': zone_label
+                })
+        
+        # Muting strength (for partial muting)
+        mute_strength = st.slider("Muting Strength (%)", 0, 100, 100, 5,
+                                 help="0% = no muting, 100% = complete muting (zero amplitude)")
+        
+        # Muting visualization option
+        show_mute_preview = st.checkbox("Show Mute Zone Preview", True,
+                                       help="Preview mute zones before processing")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     st.header("🎛️ Processing Parameters")
@@ -476,6 +576,156 @@ def apply_near_surface_correction(array, correction_type, correction_depth, max_
             result[:correction_samples, i] = normalized_trace
     
     return result
+
+def reverse_array(array):
+    """Reverse the array along the trace axis (flip A->B to B->A)"""
+    return array[:, ::-1]
+
+def apply_trace_mute(array, mute_params, x_axis=None, coordinates=None):
+    """
+    Apply trace muting to the radar array
+    
+    Parameters:
+    - array: Radar data array (samples × traces)
+    - mute_params: Dictionary containing mute settings
+    - x_axis: Distance axis for coordinate-based muting
+    - coordinates: Coordinate data for distance-based muting
+    
+    Returns:
+    - Muted array and mute mask for visualization
+    """
+    n_samples, n_traces = array.shape
+    muted_array = array.copy()
+    mute_mask = np.zeros_like(array, dtype=bool)
+    
+    # If coordinates are provided, use coordinate distance
+    if coordinates is not None and x_axis is None:
+        x_axis = coordinates['distance']
+    
+    # Handle different mute methods
+    if mute_params['method'] == "By Distance":
+        # Find trace indices corresponding to distance range
+        if x_axis is not None:
+            start_idx = np.argmin(np.abs(x_axis - mute_params['start']))
+            end_idx = np.argmin(np.abs(x_axis - mute_params['end']))
+            
+            # Ensure start < end
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+            
+            # Ensure indices are within bounds
+            start_idx = max(0, min(start_idx, n_traces-1))
+            end_idx = max(0, min(end_idx, n_traces-1))
+            
+            # Apply muting
+            if mute_params.get('apply_taper', False):
+                # Create tapered mute
+                taper_len = int((end_idx - start_idx) * mute_params.get('taper_length', 0.1))
+                taper_start = np.linspace(1, 0, taper_len)
+                taper_end = np.linspace(0, 1, taper_len)
+                
+                # Full mute middle section
+                if end_idx - start_idx > 2 * taper_len:
+                    mute_factor = (1 - mute_params['strength']/100)
+                    muted_array[:, start_idx+taper_len:end_idx-taper_len] *= mute_factor
+                    mute_mask[:, start_idx+taper_len:end_idx-taper_len] = True
+                
+                # Tapered edges
+                for i in range(taper_len):
+                    taper_val = taper_start[i]
+                    mute_factor = (1 - mute_params['strength']/100 * taper_val)
+                    muted_array[:, start_idx+i] *= mute_factor
+                    mute_mask[:, start_idx+i] = taper_val > 0.5
+                    
+                    taper_val = taper_end[i]
+                    mute_factor = (1 - mute_params['strength']/100 * taper_val)
+                    muted_array[:, end_idx-taper_len+i] *= mute_factor
+                    mute_mask[:, end_idx-taper_len+i] = taper_val > 0.5
+            else:
+                # Simple mute without taper
+                mute_factor = (1 - mute_params['strength']/100)
+                muted_array[:, start_idx:end_idx] *= mute_factor
+                mute_mask[:, start_idx:end_idx] = True
+    
+    elif mute_params['method'] == "By Trace Index":
+        start_idx = int(mute_params['start'])
+        end_idx = int(mute_params['end'])
+        
+        # Ensure start < end and within bounds
+        start_idx = max(0, min(start_idx, n_traces-1))
+        end_idx = max(0, min(end_idx, n_traces-1))
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+        
+        # Apply muting
+        if mute_params.get('apply_taper', False):
+            taper_samples = mute_params.get('taper_samples', 10)
+            taper_start = np.linspace(1, 0, taper_samples)
+            taper_end = np.linspace(0, 1, taper_samples)
+            
+            # Full mute middle section
+            if end_idx - start_idx > 2 * taper_samples:
+                mute_factor = (1 - mute_params['strength']/100)
+                muted_array[:, start_idx+taper_samples:end_idx-taper_samples] *= mute_factor
+                mute_mask[:, start_idx+taper_samples:end_idx-taper_samples] = True
+            
+            # Tapered edges
+            for i in range(taper_samples):
+                taper_val = taper_start[i]
+                mute_factor = (1 - mute_params['strength']/100 * taper_val)
+                muted_array[:, start_idx+i] *= mute_factor
+                mute_mask[:, start_idx+i] = taper_val > 0.5
+                
+                taper_val = taper_end[i]
+                mute_factor = (1 - mute_params['strength']/100 * taper_val)
+                muted_array[:, end_idx-taper_samples+i] *= mute_factor
+                mute_mask[:, end_idx-taper_samples+i] = taper_val > 0.5
+        else:
+            # Simple mute without taper
+            mute_factor = (1 - mute_params['strength']/100)
+            muted_array[:, start_idx:end_idx] *= mute_factor
+            mute_mask[:, start_idx:end_idx] = True
+    
+    return muted_array, mute_mask
+
+def apply_multiple_mute_zones(array, mute_zones, x_axis=None, coordinates=None):
+    """
+    Apply multiple mute zones to the radar array
+    
+    Parameters:
+    - array: Radar data array
+    - mute_zones: List of mute zone dictionaries
+    - x_axis: Distance axis
+    - coordinates: Coordinate data
+    
+    Returns:
+    - Muted array and combined mute mask
+    """
+    muted_array = array.copy()
+    combined_mask = np.zeros_like(array, dtype=bool)
+    
+    for zone in mute_zones:
+        zone_params = {
+            'method': zone['method'],
+            'start': zone['start'],
+            'end': zone['end'],
+            'apply_taper': zone.get('taper', False),
+            'strength': 100,  # Full strength for multiple zones
+            'taper_length': 0.1 if zone.get('taper', False) else 0,
+            'taper_samples': 10 if zone.get('taper', False) else 0
+        }
+        
+        # Apply this zone
+        zone_muted, zone_mask = apply_trace_mute(muted_array, zone_params, x_axis, coordinates)
+        
+        # Update combined mask
+        combined_mask = combined_mask | zone_mask
+        
+        # For multiple zones, we need to be careful about overlapping zones
+        # Here we simply take the minimum value (most aggressive mute) at each point
+        muted_array = np.minimum(muted_array, zone_muted)
+    
+    return muted_array, combined_mask
 
 def calculate_fft(trace, sampling_rate=1000):
     """Calculate FFT of a trace"""
@@ -747,8 +997,94 @@ if dzt_file and process_btn:
                 if arrays and len(arrays) > 0:
                     original_array = arrays[0]
                     
-                    # Apply time-varying gain
-                    processed_array = original_array.copy()
+                    # Apply line reversal if requested
+                    if reverse_line:
+                        original_array = reverse_array(original_array)
+                        st.session_state.line_reversed = True
+                        st.info("✓ Line direction reversed (A→B to B→A)")
+                    else:
+                        st.session_state.line_reversed = False
+                    
+                    # Store reversal state for later use
+                    st.session_state.reverse_line = reverse_line
+                    
+                    # Apply trace muting if requested
+                    if mute_traces:
+                        st.session_state.mute_applied = True
+                        
+                        # Prepare mute parameters
+                        mute_params = {
+                            'strength': mute_strength
+                        }
+                        
+                        # Create distance axis for muting if needed
+                        mute_x_axis = None
+                        if coordinates_data is not None and use_coords_for_distance:
+                            mute_x_axis = coordinates_data['distance']
+                        elif not use_coords_for_distance and distance_unit != "traces":
+                            # Create linear distance axis
+                            mute_x_axis = np.linspace(0, total_distance, original_array.shape[1])
+                        
+                        if mute_method == "By Distance":
+                            mute_params.update({
+                                'method': 'By Distance',
+                                'start': mute_start_dist,
+                                'end': mute_end_dist,
+                                'apply_taper': apply_taper if 'apply_taper' in locals() else False,
+                                'taper_length': taper_length/100 if 'taper_length' in locals() else 0.1
+                            })
+                            
+                            # Apply muting
+                            muted_array, mute_mask = apply_trace_mute(
+                                original_array, mute_params, mute_x_axis, coordinates_data
+                            )
+                            original_array = muted_array
+                            st.session_state.mute_mask = mute_mask
+                            st.session_state.mute_zones = [mute_params]
+                            
+                        elif mute_method == "By Trace Index":
+                            mute_params.update({
+                                'method': 'By Trace Index',
+                                'start': mute_start_idx,
+                                'end': mute_end_idx,
+                                'apply_taper': apply_taper if 'apply_taper' in locals() else False,
+                                'taper_samples': taper_samples if 'taper_samples' in locals() else 10
+                            })
+                            
+                            # Apply muting
+                            muted_array, mute_mask = apply_trace_mute(
+                                original_array, mute_params, mute_x_axis, coordinates_data
+                            )
+                            original_array = muted_array
+                            st.session_state.mute_mask = mute_mask
+                            st.session_state.mute_zones = [mute_params]
+                            
+                        elif mute_method == "Multiple Zones":
+                            # Convert mute_zones to proper format
+                            processed_zones = []
+                            for zone in mute_zones:
+                                zone_params = {
+                                    'method': zone['method'],
+                                    'start': zone['start'],
+                                    'end': zone['end'],
+                                    'apply_taper': zone['taper'],
+                                    'label': zone['label']
+                                }
+                                processed_zones.append(zone_params)
+                            
+                            # Apply multiple mute zones
+                            muted_array, mute_mask = apply_multiple_mute_zones(
+                                original_array, processed_zones, mute_x_axis, coordinates_data
+                            )
+                            original_array = muted_array
+                            st.session_state.mute_mask = mute_mask
+                            st.session_state.mute_zones = processed_zones
+                        
+                        st.success(f"✓ {len(st.session_state.mute_zones) if mute_method == 'Multiple Zones' else 1} mute zone(s) applied")
+                    else:
+                        st.session_state.mute_applied = False
+                        st.session_state.mute_mask = None
+                        st.session_state.mute_zones = None
                     
                     # Apply near-surface correction if requested
                     if apply_near_surface_correction:
@@ -773,13 +1109,16 @@ if dzt_file and process_btn:
                             correction_params['target_amplitude'] = target_amplitude
                         
                         # Apply the correction
-                        processed_array = apply_near_surface_correction(
-                            processed_array, 
+                        original_array = apply_near_surface_correction(
+                            original_array, 
                             correction_type, 
                             correction_depth, 
                             max_depth if depth_unit != "samples" else None,
                             **correction_params
                         )
+                    
+                    # Apply time-varying gain
+                    processed_array = original_array.copy()
                     
                     # Apply selected gain
                     if gain_type == "Constant":
@@ -920,11 +1259,33 @@ if st.session_state.data_loaded:
             if st.session_state.aspect_ratio:
                 st.markdown(f"**Aspect Ratio:** {st.session_state.aspect_ratio:.3f}")
             
+            # Display line adjustment info
+            if hasattr(st.session_state, 'line_reversed') and st.session_state.line_reversed:
+                st.markdown("### Line Adjustment")
+                st.markdown("**Line Direction:** Reversed (B→A)")
+            
             # Display near-surface correction info if applied
             if hasattr(st.session_state, 'near_surface_correction') and st.session_state.near_surface_correction:
                 st.markdown("### Near-Surface Correction")
                 st.markdown(f"**Type:** {st.session_state.correction_type}")
                 st.markdown(f"**Depth:** {st.session_state.correction_depth} m")
+            
+            # Display mute info if applied
+            if hasattr(st.session_state, 'mute_applied') and st.session_state.mute_applied:
+                st.markdown("### Trace Muting")
+                st.markdown(f"**Muting Applied:** ✓")
+                st.markdown(f"**Mute Strength:** {mute_strength if 'mute_strength' in locals() else 100}%")
+                
+                if hasattr(st.session_state, 'mute_zones'):
+                    for i, zone in enumerate(st.session_state.mute_zones):
+                        zone_label = zone.get('label', f'Zone {i+1}')
+                        if zone['method'] == 'By Distance':
+                            st.markdown(f"**{zone_label}:** Distance {zone['start']:.1f} - {zone['end']:.1f} {st.session_state.distance_unit}")
+                        else:
+                            st.markdown(f"**{zone_label}:** Traces {zone['start']} - {zone['end']}")
+                        
+                        if zone.get('apply_taper', False):
+                            st.markdown(f"  *With taper applied*")
         
         with col2:
             if st.session_state.header:
@@ -1014,6 +1375,27 @@ if st.session_state.data_loaded:
         
         if show_colorbar:
             plt.colorbar(im2, ax=ax2_full, label='Amplitude')
+        
+        # Add mute zone visualization if applied
+        if hasattr(st.session_state, 'mute_applied') and st.session_state.mute_applied:
+            if hasattr(st.session_state, 'mute_mask'):
+                # Create a transparent red colormap for mute zones
+                mute_cmap = ListedColormap([(1, 0, 0, 0.3)])  # Red with 30% opacity
+                
+                # Plot mute mask overlay
+                ax1_full.imshow(st.session_state.mute_mask, 
+                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
+                              aspect=aspect_display, cmap=mute_cmap, alpha=0.3,
+                              interpolation='nearest')
+                ax2_full.imshow(st.session_state.mute_mask, 
+                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
+                              aspect=aspect_display, cmap=mute_cmap, alpha=0.3,
+                              interpolation='nearest')
+                
+                # Add legend
+                mute_patch = Patch(facecolor='red', alpha=0.3, label='Mute Zone')
+                ax1_full.legend(handles=[mute_patch], loc='upper right')
+                ax2_full.legend(handles=[mute_patch], loc='upper right')
         
         plt.tight_layout()
         st.pyplot(fig_full)
@@ -1292,9 +1674,9 @@ if st.session_state.data_loaded:
             
             with col2:
                 st.metric("Easting Range", 
-                         f"{np.ptp(st.session_state.interpolated_coords['easting']):.1f} m")
+                         f"{st.session_state.interpolated_coords['easting'].ptp():.1f} m")
                 st.metric("Northing Range", 
-                         f"{np.ptp(st.session_state.interpolated_coords['northing']):.1f} m")
+                         f"{st.session_state.interpolated_coords['northing'].ptp():.1f} m")
             
             with col3:
                 avg_spacing = np.mean(np.diff(st.session_state.interpolated_coords['distance']))
@@ -1375,7 +1757,7 @@ if st.session_state.data_loaded:
             # Plot GPR data with coordinate-based distance
             im = ax4.imshow(st.session_state.processed_array,
                           extent=[st.session_state.interpolated_coords['distance'][0],
-                                 st.session_state.interpolated_coords['distance'][-1],
+                                 st.session_state.interpolated_coords['distance'][  -1],
                                  depth_axis[-1], depth_axis[0]],
                           aspect=aspect_value_coords, cmap='seismic', alpha=0.9)
             ax4.set_xlabel('Distance along profile (m)')
@@ -1414,10 +1796,8 @@ if st.session_state.data_loaded:
             
             # Use pcolormesh for elevation-adjusted display
             mesh = ax_elev.pcolormesh(X, Y_elev, st.session_state.processed_array,
-                                      vmin=vmin_plot, vmax=vmax_plot,
                                      cmap='seismic', shading='auto', alpha=0.9)
             
-        
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
             ax_elev.set_title('GPR Data with Elevation Adjustment')
@@ -1780,6 +2160,26 @@ if st.session_state.data_loaded:
                     mime="text/csv",
                     use_container_width=True
                 )
+        
+        # Export mute settings
+        if hasattr(st.session_state, 'mute_applied') and st.session_state.mute_applied:
+            st.subheader("Export Mute Settings")
+            
+            if st.button("📝 Export Mute Settings as JSON", use_container_width=True):
+                mute_settings = {
+                    'line_reversed': st.session_state.line_reversed if hasattr(st.session_state, 'line_reversed') else False,
+                    'mute_zones': st.session_state.mute_zones if hasattr(st.session_state, 'mute_zones') else [],
+                    'mute_strength': mute_strength if 'mute_strength' in locals() else 100
+                }
+                
+                json_string = json.dumps(mute_settings, indent=2)
+                st.download_button(
+                    label="📥 Download Mute Settings",
+                    data=json_string,
+                    file_name="mute_settings.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
 
 # Initial state message
 elif not dzt_file:
@@ -1788,17 +2188,32 @@ elif not dzt_file:
         st.info("""
         👈 **Upload a DZT file to begin processing**
         
-        **New Coordinate Features:**
-        1. **CSV Coordinate Import:** Upload CSV with Easting, Northing, Elevation
-        2. **Automatic Interpolation:** Interpolates coordinates to match GPR traces
-        3. **Aspect Ratio Control:** Adjust Y:X scale for realistic visualization
-        4. **Coordinate-Based Visualization:** Plan view, elevation profile, 3D view
+        **New Features Added:**
         
-        **New Near-Surface Correction:**
-        1. **Amplitude Normalization:** Reduce high amplitudes in 0-2.5m region
-        2. **Multiple Methods:** Linear, Exponential, Gaussian, or Windowed normalization
-        3. **Preserve Depth:** No need to adjust time zero excessively
-        4. **Better Visualization:** Normalized amplitudes across entire profile
+        1. **Line Reversal:**
+           - Reverse survey direction (A→B to B→A)
+           - Maintains coordinate integrity
+        
+        2. **Trace Muting:**
+           - Mute specific trace ranges (e.g., 2m to 6m)
+           - Three methods: By Distance, By Trace Index, Multiple Zones
+           - Adjustable mute strength (0-100%)
+           - Taper options for smoother transitions
+           - Visual overlay on plots
+        
+        3. **Near-Surface Correction:**
+           - Reduce high amplitudes in 0-2.5m region
+           - Multiple correction methods
+           - No need for excessive time zero adjustments
+        
+        4. **Coordinate Import:**
+           - CSV with Easting, Northing, Elevation
+           - Automatic interpolation to match GPR traces
+           - Plan view, elevation profile, 3D visualization
+        
+        5. **Aspect Ratio Control:**
+           - Adjust Y:X scale for realistic visualization
+           - Auto, Equal, Manual, or Realistic modes
         
         **Coordinate CSV Format:**
         ```
@@ -1809,24 +2224,21 @@ elif not dzt_file:
         ...
         ```
         
-        **Aspect Ratio Examples:**
-        - 1:1 (Square)
-        - 1:10 (Standard GPR display)
-        - 1:50 (Very stretched for deep investigations)
-        - Auto (Matplotlib default)
-        
-        **Realistic Display:** Choose aspect ratios that match your survey conditions!
+        **Quick Start:**
+        1. Upload DZT file
+        2. Set axis scaling
+        3. Enable line reversal if needed
+        4. Define mute zones if required
+        5. Adjust processing parameters
+        6. Click "Process Data"
         """)
 
 # Footer
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "📡 <b>GPR Data Processor v5.1</b> | Coordinate Import & Near-Surface Correction | "
+    "📡 <b>GPR Data Processor v6.0</b> | Line Reversal & Trace Muting | "
     "Built with Streamlit & readgssi"
     "</div>",
     unsafe_allow_html=True
 )
-
-
-
