@@ -2637,7 +2637,7 @@ if st.session_state.data_loaded:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            trace_for_fft = st.slider("Select Trace for FFT", 
+            trace_for_fft = st.number_input("Select Trace for FFT", 
                                      0, st.session_state.processed_array.shape[1]-1, 
                                      st.session_state.processed_array.shape[1]//2,
                                      key="fft_trace")
@@ -3216,6 +3216,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
