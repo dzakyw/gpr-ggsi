@@ -119,7 +119,7 @@ with st.sidebar:
                                        type=['csv'], key="pole_csv")
             
         # Initialize pole data
-            pole_data = None
+    pole_data = None
             if pole_csv:
                 try:
                     pole_df = pd.read_csv(pole_csv)
@@ -3215,6 +3215,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
