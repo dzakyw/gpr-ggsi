@@ -1970,13 +1970,7 @@ if st.session_state.data_loaded:
                              aspect=aspect_display, cmap=colormap, 
                              vmin=vmin_plot, vmax=vmax_plot,
                              interpolation=interpolation)
-        ax1_full.scatter(pole_data['projected_distances'][i], 
-                pole_elev + 0.5, 
-                c=color, 
-                marker=marker, 
-                s=100, 
-                alpha=0.9, 
-                zorder=10)
+        
         ax1_full.set_xlabel(x_label_full)
         ax1_full.set_ylabel(y_label_full)
         ax1_full.set_title("Original Data")
@@ -3222,6 +3216,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
