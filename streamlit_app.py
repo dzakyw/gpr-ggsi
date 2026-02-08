@@ -120,7 +120,7 @@ with st.sidebar:
             
         # Initialize pole data
     pole_data = None
-        if pole_csv:
+    if pole_csv:
             try:
                 pole_df = pd.read_csv(pole_csv)
                 st.success(f"Loaded {len(pole_df)} electric pole locations")
@@ -3215,6 +3215,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
