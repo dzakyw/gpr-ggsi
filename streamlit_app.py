@@ -2231,7 +2231,7 @@ if st.session_state.data_loaded:
             
             with col1:
                 # Select trace within window
-                trace_in_window = st.slider(
+                trace_in_window = st.number_input(
                     "Select Trace in Window", 
                     0, window_data.shape[1]-1,
                     window_data.shape[1]//2,
@@ -3216,6 +3216,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
