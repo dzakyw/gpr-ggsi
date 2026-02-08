@@ -2785,49 +2785,14 @@ if st.session_state.data_loaded:
                 else:
                     gain_profile[i] = 1.0
         
-        # Try to get scaled depth axis from scale_axes function
-        try:
-            result = scale_axes(
-                (n_samples, 1),
-                st.session_state.depth_unit,
-                st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-                "traces",
-                None
-            )
-            
-            # Check how many values are returned
-            if len(result) >= 4:
-                y_axis_analysis = result[0]
-                y_label_analysis = result[3] if len(result) >= 4 else "Depth"
-            else:
-                raise ValueError("scale_axes returned insufficient values")
-                
-        except Exception as e:
-            st.warning(f"Could not use scale_axes: {e}. Creating depth axis manually.")
-            # Create depth axis manually
-            if st.session_state.depth_unit == "samples":
-                y_axis_analysis = np.arange(n_samples)
-                y_label_analysis = "Sample Number"
-            else:
-                if hasattr(st.session_state, 'max_depth') and st.session_state.max_depth is not None:
-                    y_axis_analysis = np.linspace(0, st.session_state.max_depth, n_samples)
-                    y_label_analysis = f"Depth ({st.session_state.depth_unit})"
-                else:
-                    y_axis_analysis = np.arange(n_samples)
-                    y_label_analysis = "Depth"
-        
-        # Debug info (you can remove this after fixing)
-        st.write(f"gain_profile shape: {gain_profile.shape}")
-        st.write(f"y_axis_analysis shape: {y_axis_analysis.shape}")
-        st.write(f"y_label_analysis: {y_label_analysis}")
-        
-        # Ensure both arrays have the same length
-        if len(gain_profile) != len(y_axis_analysis):
-            st.error(f"Array length mismatch: gain_profile={len(gain_profile)}, y_axis={len(y_axis_analysis)}")
-            # Truncate to minimum length
-            min_length = min(len(gain_profile), len(y_axis_analysis))
-            gain_profile = gain_profile[:min_length]
-            y_axis_analysis = y_axis_analysis[:min_length]
+        # Create scaled depth axis
+        y_axis_analysis, _, _, y_label_analysis = scale_axes(
+            (n_samples, 1),
+            st.session_state.depth_unit,
+            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+            "traces",
+            None
+        )[0:4]  # Only get first 4 values
         
         # Plot gain profile
         fig_gain, ax_gain = plt.subplots(figsize=(10, 6))
@@ -3252,6 +3217,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
