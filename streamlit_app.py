@@ -2506,7 +2506,7 @@ if st.session_state.data_loaded:
             st.pyplot(fig_coords)
             
             # ELECTRIC POLE ANOMALY COMPARISON PLOT
-            st.subheader("Electric Pole Anomaly Comparison")
+            st.subheader("GPR Line Plot")
             
             # Calculate elevation-adjusted depth for GPR display
             n_traces = st.session_state.processed_array.shape[1]
@@ -2535,7 +2535,7 @@ if st.session_state.data_loaded:
             # Add topographic surface line
             ax_elev.plot(st.session_state.interpolated_coords['distance'],
                         st.session_state.interpolated_coords['elevation'],
-                        'k-', linewidth=2, alpha=0.8, label='Surface')
+                        'k-', linewidth=1, alpha=0.8, label='Surface')
             ax_elev.fill_between(st.session_state.interpolated_coords['distance'],
                                 Y_elev.min(), st.session_state.interpolated_coords['elevation'],
                                 alpha=0.1, color='gray')
@@ -2549,7 +2549,7 @@ if st.session_state.data_loaded:
                         marker = '^'
                         label = 'TS Pole'
                     elif 'TL' in str(pole_data['names'][i]):
-                        color = 'purple'
+                        color = 'green'
                         marker = '^'
                         label = 'TL Pole'
                     else:
@@ -2558,19 +2558,18 @@ if st.session_state.data_loaded:
                         label = 'Other Pole'
                     
                     # Plot pole at surface elevation
-                    ax_elev.scatter(pole_data['projected_distances'][i], pole_elev,
-                                   c=color, marker=marker, s=150, edgecolor='black', 
-                                   linewidth=2, alpha=0.9, zorder=10, label=label)
+                    ax_elev.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
+                                   c=color, marker=marker, s=100, 
+                                    alpha=0.9, zorder=10)
                     
                     # Add vertical dashed line from pole to bottom of plot
-                    ax_elev.plot([pole_data['projected_distances'][i], pole_data['projected_distances'][i]],
-                                [pole_elev, Y_elev.min()],
-                                color=color, linestyle='--', alpha=0.5, linewidth=1)
+                    #ax_elev.plot([pole_data['projected_distances'][i], pole_data['projected_distances'][i]],
+                     #           [pole_elev, Y_elev.min()],
+                      #          color=color, linestyle='--', alpha=0.5, linewidth=1)
                     
                     # Add pole name
-                    ax_elev.text(pole_data['projected_distances'][i], pole_elev + 0.3,
-                                pole_data['names'][i], fontsize=9, ha='center',
-                                bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.3))
+                    ax_elev.text(pole_data['projected_distances'][i], pole_elev + 0.7,
+                                pole_data['names'][i], fontsize=6, ha='center')
                 
                 # Create custom legend for poles
                 from matplotlib.lines import Line2D
@@ -3213,6 +3212,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
