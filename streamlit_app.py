@@ -2366,7 +2366,7 @@ if st.session_state.data_loaded:
                     else:
                         color = 'orange'
                         marker = 'o'
-                        label = 'Other Pole'
+                        label = 'CPT'
                     
                     ax1.scatter(pole_data['easting'][i], pole_data['northing'][i], 
                                c=color, marker=marker, s=100, edgecolor='black', 
@@ -2555,12 +2555,12 @@ if st.session_state.data_loaded:
                     else:
                         color = 'orange'
                         marker = 'o'
-                        label = 'Other Pole'
+                        label = 'CPT'
                     
                     # Plot pole at surface elevation
                     ax_elev.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
                                    c=color, marker=marker, s=100, 
-                                    alpha=0.9, zorder=10,label='TL/TS/CPT')
+                                    alpha=0.9, zorder=10)
                     
                     # Add vertical dashed line from pole to bottom of plot
                     #ax_elev.plot([pole_data['projected_distances'][i], pole_data['projected_distances'][i]],
@@ -3212,6 +3212,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
