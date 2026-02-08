@@ -2785,13 +2785,32 @@ if st.session_state.data_loaded:
                     gain_profile[i] = 1.0
         
         # Create scaled depth axis
+        # Get the full y_axis array from scale_axes
         y_axis_analysis, _, _, y_label_analysis = scale_axes(
             (n_samples, 1),
             st.session_state.depth_unit,
             st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
             "traces",
             None
-        )[0:4]  # Only get first 4 values
+        )
+        
+        # If y_axis_analysis is not the right length, create it manually
+        if len(y_axis_analysis) != n_samples:
+            # Create depth axis based on depth unit and max_depth
+            if st.session_state.depth_unit == "samples":
+                y_axis_analysis = np.arange(n_samples)
+                y_label_analysis = "Sample Number"
+            else:
+                if hasattr(st.session_state, 'max_depth') and st.session_state.max_depth is not None:
+                    y_axis_analysis = np.linspace(0, st.session_state.max_depth, n_samples)
+                else:
+                    y_axis_analysis = np.arange(n_samples)
+                    y_label_analysis = f"Depth ({st.session_state.depth_unit})" if st.session_state.depth_unit else "Depth"
+        
+        # Ensure both arrays have the same length
+        min_length = min(len(gain_profile), len(y_axis_analysis))
+        gain_profile = gain_profile[:min_length]
+        y_axis_analysis = y_axis_analysis[:min_length]
         
         # Plot gain profile
         fig_gain, ax_gain = plt.subplots(figsize=(10, 6))
@@ -2817,6 +2836,59 @@ if st.session_state.data_loaded:
             st.metric("Max Gain", f"{gain_profile.max():.2f}x")
         with col3:
             st.metric("Mean Gain", f"{gain_profile.mean():.2f}x")
+            
+            
+            st.subheader("Gain Analysis")
+            
+            # Calculate gain profile
+            n_samples = st.session_state.original_array.shape[0]
+            
+            with np.errstate(divide='ignore', invalid='ignore'):
+                gain_profile = np.zeros(n_samples)
+                for i in range(n_samples):
+                    orig_slice = st.session_state.original_array[i, :]
+                    proc_slice = st.session_state.processed_array[i, :]
+                    
+                    mask = np.abs(orig_slice) > 1e-10
+                    if np.any(mask):
+                        gains = np.abs(proc_slice[mask]) / np.abs(orig_slice[mask])
+                        gain_profile[i] = np.median(gains)
+                    else:
+                        gain_profile[i] = 1.0
+            
+            # Create scaled depth axis
+            y_axis_analysis, _, _, y_label_analysis = scale_axes(
+                (n_samples, 1),
+                st.session_state.depth_unit,
+                st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+                "traces",
+                None
+            )[0:4]  # Only get first 4 values
+            
+            # Plot gain profile
+            fig_gain, ax_gain = plt.subplots(figsize=(10, 6))
+            
+            ax_gain.plot(gain_profile, y_axis_analysis, 'b-', linewidth=2, label='Gain Factor')
+            ax_gain.fill_betweenx(y_axis_analysis, 1, gain_profile, alpha=0.3, color='blue')
+            
+            ax_gain.set_xlabel("Gain Factor (multiplier)")
+            ax_gain.set_ylabel(y_label_analysis)
+            ax_gain.set_title("Gain Applied vs Depth")
+            ax_gain.grid(True, alpha=0.3)
+            ax_gain.legend()
+            ax_gain.invert_yaxis()  # Depth increases downward
+            
+            st.pyplot(fig_gain)
+            
+            # Show statistics
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Min Gain", f"{gain_profile.min():.2f}x")
+            with col2:
+                st.metric("Max Gain", f"{gain_profile.max():.2f}x")
+            with col3:
+                st.metric("Mean Gain", f"{gain_profile.mean():.2f}x")
     
     with tabs[6]:  # NEW: Deconvolution Analysis
         st.subheader("Deconvolution Analysis")
@@ -3216,6 +3288,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
