@@ -2528,7 +2528,7 @@ if st.session_state.data_loaded:
             
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
-            ax_elev.set_title('GPR Data with Elevation Adjustment & Electric Pole Markers')
+            ax_elev.set_title('GPR Section')
             ax_elev.grid(True, alpha=0.2)
             plt.colorbar(mesh, ax=ax_elev, label='Amplitude')
             
@@ -2560,7 +2560,7 @@ if st.session_state.data_loaded:
                     # Plot pole at surface elevation
                     ax_elev.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
                                    c=color, marker=marker, s=100, 
-                                    alpha=0.9, zorder=10)
+                                    alpha=0.9, zorder=10,label='TL/TS/CPT')
                     
                     # Add vertical dashed line from pole to bottom of plot
                     #ax_elev.plot([pole_data['projected_distances'][i], pole_data['projected_distances'][i]],
@@ -2568,7 +2568,7 @@ if st.session_state.data_loaded:
                       #          color=color, linestyle='--', alpha=0.5, linewidth=1)
                     
                     # Add pole name
-                    ax_elev.text(pole_data['projected_distances'][i], pole_elev + 0.7,
+                    ax_elev.text(pole_data['projected_distances'][i], pole_elev + 1,
                                 pole_data['names'][i], fontsize=6, ha='center')
                 
                 # Create custom legend for poles
@@ -3212,6 +3212,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
