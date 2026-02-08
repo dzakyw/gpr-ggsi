@@ -120,67 +120,67 @@ with st.sidebar:
             
         # Initialize pole data
     pole_data = None
-            if pole_csv:
-                try:
-                    pole_df = pd.read_csv(pole_csv)
-                    st.success(f"Loaded {len(pole_df)} electric pole locations")
+        if pole_csv:
+            try:
+                pole_df = pd.read_csv(pole_csv)
+                st.success(f"Loaded {len(pole_df)} electric pole locations")
                         
-                    # Check required columns
-                    required_pole_cols = ['Easting', 'Northing', 'Name']
-                    available_pole_cols = {}
+                # Check required columns
+                required_pole_cols = ['Easting', 'Northing', 'Name']
+                available_pole_cols = {}
                         
-                    for req in required_pole_cols:
-                        matches = [col for col in pole_df.columns if req.lower() in col.lower()]
-                        if matches:
-                            available_pole_cols[req] = matches[0]
-                        else:
-                            st.error(f"Column '{req}' not found in pole CSV. Available columns: {list(pole_df.columns)}")
-                            pole_df = None
-                            break
+                for req in required_pole_cols:
+                    matches = [col for col in pole_df.columns if req.lower() in col.lower()]
+                    if matches:
+                        available_pole_cols[req] = matches[0]
+                    else:
+                        st.error(f"Column '{req}' not found in pole CSV. Available columns: {list(pole_df.columns)}")
+                        pole_df = None
+                        break
                         
-                    if pole_df is not None:
-                        # Extract pole data
-                        pole_easting = pole_df[available_pole_cols['Easting']].values
-                        pole_northing = pole_df[available_pole_cols['Northing']].values
-                        pole_names = pole_df[available_pole_cols['Name']].values
+                if pole_df is not None:
+                    # Extract pole data
+                    pole_easting = pole_df[available_pole_cols['Easting']].values
+                    pole_northing = pole_df[available_pole_cols['Northing']].values
+                    pole_names = pole_df[available_pole_cols['Name']].values
                             
-                        # Find nearest distance to GPR line for each pole
-                        gpr_easting = st.session_state.interpolated_coords['easting']
-                        gpr_northing = st.session_state.interpolated_coords['northing']
-                        gpr_distance = st.session_state.interpolated_coords['distance']
+                    # Find nearest distance to GPR line for each pole
+                    gpr_easting = st.session_state.interpolated_coords['easting']
+                    gpr_northing = st.session_state.interpolated_coords['northing']
+                    gpr_distance = st.session_state.interpolated_coords['distance']
                             
-                        pole_projected_distances = []
-                        pole_min_distances = []
+                    pole_projected_distances = []
+                    pole_min_distances = []
                             
-                        for i in range(len(pole_easting)):
-                            # Calculate distance to each GPR point
-                            distances = np.sqrt((gpr_easting - pole_easting[i])**2 + 
+                    for i in range(len(pole_easting)):
+                        # Calculate distance to each GPR point
+                        distances = np.sqrt((gpr_easting - pole_easting[i])**2 + 
                                                   (gpr_northing - pole_northing[i])**2)
-                            min_idx = np.argmin(distances)
-                            min_dist = distances[min_idx]
-                            projected_dist = gpr_distance[min_idx]
+                        min_idx = np.argmin(distances)
+                        min_dist = distances[min_idx]
+                        projected_dist = gpr_distance[min_idx]
                                 
-                            pole_projected_distances.append(projected_dist)
-                            pole_min_distances.append(min_dist)
+                        pole_projected_distances.append(projected_dist)
+                        pole_min_distances.append(min_dist)
                             
-                        # Filter poles within reasonable distance (e.g., 10m from line)
-                        max_distance_threshold = st.slider("Max distance from GPR line (m)", 1.0, 50.0, 10.0, 1.0)
+                    # Filter poles within reasonable distance (e.g., 10m from line)
+                    max_distance_threshold = st.slider("Max distance from GPR line (m)", 1.0, 50.0, 10.0, 1.0)
                             
-                        filtered_indices = [i for i, d in enumerate(pole_min_distances) if d <= max_distance_threshold]
+                    filtered_indices = [i for i, d in enumerate(pole_min_distances) if d <= max_distance_threshold]
                             
-                        if filtered_indices:
-                            pole_data = {
-                                'easting': pole_easting[filtered_indices],
+                    if filtered_indices:
+                        pole_data = {
+                            'easting': pole_easting[filtered_indices],
                                 'northing': pole_northing[filtered_indices],
                                 'names': pole_names[filtered_indices],
                                 'projected_distances': np.array(pole_projected_distances)[filtered_indices],
                                 'min_distances': np.array(pole_min_distances)[filtered_indices]
-                            }
-                            st.info(f"Found {len(filtered_indices)} poles within {max_distance_threshold}m of GPR line")
-                        else:
-                            st.warning(f"No poles found within {max_distance_threshold}m of GPR line")
-                except Exception as e:
-                    st.error(f"Error loading pole CSV: {str(e)}")
+                        }
+                        st.info(f"Found {len(filtered_indices)} poles within {max_distance_threshold}m of GPR line")
+                    else:
+                        st.warning(f"No poles found within {max_distance_threshold}m of GPR line")
+            except Exception as e:
+                st.error(f"Error loading pole CSV: {str(e)}")
                     
     st.markdown("---")            
     st.header("🗺️ Coordinate Import (Optional)")
