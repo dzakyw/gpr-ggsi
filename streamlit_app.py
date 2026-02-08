@@ -2231,7 +2231,7 @@ if st.session_state.data_loaded:
             
             with col1:
                 # Select trace within window
-                trace_in_window = st.number_input(
+                trace_in_window = st.slider(
                     "Select Trace in Window", 
                     0, window_data.shape[1]-1,
                     window_data.shape[1]//2,
@@ -2240,22 +2240,43 @@ if st.session_state.data_loaded:
                 
                 # Get the actual trace index
                 actual_trace_idx = window_info['dist_min_idx'] + trace_in_window
+                trace_distance = x_axis_window[trace_in_window]
+                
+                # Get trace data
+                trace_depth = y_axis_window
+                trace_amplitude = window_data[:, trace_in_window]
                 
                 # Plot trace
                 fig_trace, ax_trace = plt.subplots(figsize=(10, 6))
                 
-                ax_trace.plot(y_axis_window, window_data[:, trace_in_window], 
+                ax_trace.plot(trace_depth, trace_amplitude, 
                              'b-', linewidth=1.5, alpha=0.8)
-                ax_trace.fill_between(y_axis_window, 0, window_data[:, trace_in_window], 
+                ax_trace.fill_between(trace_depth, 0, trace_amplitude, 
                                      alpha=0.3, color='blue')
                 ax_trace.set_xlabel(y_label)
                 ax_trace.set_ylabel("Amplitude")
                 ax_trace.set_title(f"Trace {actual_trace_idx} in Window\n"
-                                 f"Distance: {x_axis_window[trace_in_window]:.1f} {st.session_state.distance_unit}")
+                                 f"Distance: {trace_distance:.1f} {st.session_state.distance_unit}")
                 ax_trace.grid(True, alpha=0.3)
-                ax_trace.invert_xaxis()
+                ax_trace.invert_xaxis()  # Depth increases downward
                 
                 st.pyplot(fig_trace)
+                
+                # SIMPLE DOWNLOAD TRACE DATA
+                trace_df = pd.DataFrame({
+                    'Depth': trace_depth,
+                    'Amplitude': trace_amplitude
+                })
+                
+                trace_csv = trace_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download Trace Data",
+                    data=trace_csv,
+                    file_name=f"trace_{actual_trace_idx}.csv",
+                    mime="text/csv",
+                    key="download_trace_simple"
+                )
             
             with col2:
                 # Select depth slice within window
@@ -2269,12 +2290,16 @@ if st.session_state.data_loaded:
                 # Get actual depth value
                 actual_depth = y_axis_window[depth_slice_in_window]
                 
+                # Get depth slice data
+                slice_distance = x_axis_window
+                slice_amplitude = window_data[depth_slice_in_window, :]
+                
                 # Plot depth slice
                 fig_slice, ax_slice = plt.subplots(figsize=(10, 6))
                 
-                ax_slice.plot(x_axis_window, window_data[depth_slice_in_window, :], 
+                ax_slice.plot(slice_distance, slice_amplitude, 
                              'r-', linewidth=1.5, alpha=0.8)
-                ax_slice.fill_between(x_axis_window, 0, window_data[depth_slice_in_window, :], 
+                ax_slice.fill_between(slice_distance, 0, slice_amplitude, 
                                      alpha=0.3, color='red')
                 ax_slice.set_xlabel(x_label)
                 ax_slice.set_ylabel("Amplitude")
@@ -2282,7 +2307,22 @@ if st.session_state.data_loaded:
                 ax_slice.grid(True, alpha=0.3)
                 
                 st.pyplot(fig_slice)
-            
+                
+                # SIMPLE DOWNLOAD DEPTH SLICE DATA
+                slice_df = pd.DataFrame({
+                    'Distance': slice_distance,
+                    'Amplitude': slice_amplitude
+                })
+                
+                slice_csv = slice_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="📥 Download Depth Slice Data",
+                    data=slice_csv,
+                    file_name=f"depth_slice_{actual_depth:.2f}.csv",
+                    mime="text/csv",
+                    key="download_slice_simple"
+                )
             # Window statistics
             st.subheader("Window Statistics")
             
@@ -3253,6 +3293,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
