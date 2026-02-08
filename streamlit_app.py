@@ -1985,15 +1985,15 @@ if st.session_state.data_loaded:
                              aspect=aspect_display, cmap=colormap,
                              vmin=vmin_plot, vmax=vmax_plot,
                              interpolation=interpolation)
-        
+        im2.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
+                                   c=color, marker=marker, s=100, 
+                                    alpha=0.9, zorder=10)
         if hasattr(st.session_state, 'deconvolution_applied') and st.session_state.deconvolution_applied:
             ax2_full.set_title(f"Processed ({gain_type} Gain + {st.session_state.deconv_method})")
         else:
             ax2_full.set_title(f"Processed ({gain_type} Gain)")
         
-        ax2_full.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
-                                   c=color, marker=marker, s=100, 
-                                    alpha=0.9, zorder=10)
+        
         ax2_full.set_xlabel(x_label_full)
         ax2_full.set_ylabel(y_label_full)
         ax2_full.grid(True, alpha=0.3, linestyle='--')
@@ -3218,6 +3218,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
