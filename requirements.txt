@@ -1,5 +1,4 @@
-streamlit
-readgssi 
+streamlit 
 obspy
 numpy
 scipy
@@ -12,4 +11,5 @@ pandas
 h5py 
 obspy
 plotly
+
 
