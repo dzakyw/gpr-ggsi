@@ -12,4 +12,5 @@ pandas
 h5py 
 obspy
 plotly
+pkg_resources
 
