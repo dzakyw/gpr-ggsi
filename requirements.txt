@@ -4,6 +4,7 @@ numpy
 scipy
 matplotlib
 pandas
+readgssi
 h5py
 geopy
 pytz
@@ -11,6 +12,4 @@ pandas
 h5py 
 obspy
 plotly
-readgssi==0.2.3
-
 
