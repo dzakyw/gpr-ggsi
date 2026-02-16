@@ -6,6 +6,7 @@ Created on Thu Feb  5 18:39:39 2026
 """
 
 import streamlit as st
+import pkg_resources
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -3299,6 +3300,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
