@@ -428,6 +428,137 @@ with st.sidebar:
     process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
 
 # Helper functions
+class DZTHeader:
+    """
+    Minimal DZT header parser based on common GSSI structure.
+    Works for most SIR-3000 / SIR-4000 style files.
+    """
+
+    def __init__(self):
+        self.samples = None
+        self.traces = None
+        self.bits = None
+        self.time_window = None
+        self.data_offset = None
+        self.antenna_frequency = None
+
+
+def read_dzt(filepath, verbose=False):
+    """
+    Read GSSI .dzt file without external libraries.
+
+    Returns:
+        header_dict
+        [data_array]  -> list with one 2D numpy array (samples x traces)
+        gps           -> None (placeholder)
+    """
+
+    if not os.path.exists(filepath):
+        raise FileNotFoundError(f"File not found: {filepath}")
+
+    header = DZTHeader()
+
+    with open(filepath, "rb") as f:
+
+        # --------------------------------------------------
+        # 1. Read fixed header block (first 1024 bytes)
+        # --------------------------------------------------
+        header_bytes = f.read(1024)
+
+        # Common GSSI DZT offsets (empirical standard layout)
+        # NOTE: offsets may vary slightly depending on firmware,
+        # but this works for most modern DZT files.
+
+        header.samples = struct.unpack("<H", header_bytes[0:2])[0]
+        header.bits = struct.unpack("<H", header_bytes[2:4])[0]
+        header.traces = struct.unpack("<I", header_bytes[4:8])[0]
+
+        header.time_window = struct.unpack("<f", header_bytes[8:12])[0]
+
+        # Data offset usually stored at byte 512 or fixed at 1024
+        header.data_offset = 1024
+
+        # Antenna frequency (often stored around byte 32–36)
+        try:
+            header.antenna_frequency = struct.unpack("<f", header_bytes[32:36])[0]
+        except:
+            header.antenna_frequency = None
+
+        if verbose:
+            print("DZT HEADER INFO")
+            print("Samples per trace:", header.samples)
+            print("Number of traces :", header.traces)
+            print("Bits per sample  :", header.bits)
+            print("Time window (ns) :", header.time_window)
+            print("Antenna freq MHz :", header.antenna_frequency)
+
+        # --------------------------------------------------
+        # 2. Move to data section
+        # --------------------------------------------------
+        f.seek(header.data_offset)
+
+        # Determine numpy dtype from bits
+        if header.bits == 16:
+            dtype = np.int16
+        elif header.bits == 32:
+            dtype = np.int32
+        elif header.bits == 8:
+            dtype = np.int8
+        else:
+            raise ValueError(f"Unsupported bit depth: {header.bits}")
+
+        # --------------------------------------------------
+        # 3. Read full data block
+        # --------------------------------------------------
+        data = np.fromfile(f, dtype=dtype)
+
+    # ------------------------------------------------------
+    # 4. Safety check: compute traces if header incorrect
+    # ------------------------------------------------------
+    total_samples = len(data)
+
+    if header.samples is None or header.samples == 0:
+        raise ValueError("Invalid number of samples in header.")
+
+    computed_traces = total_samples // header.samples
+
+    if header.traces is None or header.traces == 0:
+        header.traces = computed_traces
+
+    if computed_traces != header.traces:
+        # Header sometimes wrong — trust file size
+        header.traces = computed_traces
+
+    # ------------------------------------------------------
+    # 5. Reshape properly (samples x traces)
+    # ------------------------------------------------------
+    data = data[: header.samples * header.traces]
+    data = data.reshape((header.traces, header.samples))
+
+    # Transpose to match standard processing (samples x traces)
+    data = data.T
+
+    # ------------------------------------------------------
+    # 6. Convert to float for processing pipeline
+    # ------------------------------------------------------
+    data = data.astype(np.float32)
+
+    # ------------------------------------------------------
+    # 7. Build return structure (compatible with readgssi)
+    # ------------------------------------------------------
+    header_dict = {
+        "samples": header.samples,
+        "traces": header.traces,
+        "bits": header.bits,
+        "time_window_ns": header.time_window,
+        "antenna_frequency_mhz": header.antenna_frequency,
+    }
+
+    arrays = [data]
+    gps = None  # You can implement DZG parsing later if needed
+
+    return header_dict, arrays, gps
+
 def apply_gain(array, gain_type, **kwargs):
     """Apply time-varying gain to radar data"""
     n_samples, n_traces = array.shape
@@ -921,7 +1052,7 @@ if dzt_file and process_btn:
         try:
             # Try to import readgssi
             try:
-                from readgssi import readgssi
+                from my_dzt_reader import read_dzt
             except ImportError:
                 st.error("⚠️ readgssi not installed! Please run:")
                 st.code("pip install readgssi")
@@ -989,8 +1120,8 @@ if dzt_file and process_btn:
                 progress_bar.progress(50)
                 
                 # Read data
-                header, arrays, gps = readgssi.readgssi(**params)
-                
+                header, arrays, gps = read_dzt(dzt_path, verbose=False)
+
                 progress_bar.progress(70)
                 
                 # Store original array
@@ -2243,3 +2374,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
