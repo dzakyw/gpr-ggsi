@@ -117,74 +117,7 @@ with st.sidebar:
                                 help="Optional: Required for GPS-based distance normalization")
     
     st.markdown("---")
-    st.header("🗼 Electric Pole Coordinates (Optional)")
-    pole_csv = st.file_uploader("Upload Electric Pole CSV (Easting, Northing, Name)", 
-                                       type=['csv'], key="pole_csv")
-            
-        # Initialize pole data
-    pole_data = None
-    if pole_csv:
-        try:
-            pole_df = pd.read_csv(pole_csv)
-            st.success(f"Loaded {len(pole_df)} electric pole locations")
-                        
-            # Check required columns
-            required_pole_cols = ['Easting', 'Northing', 'Name']
-            available_pole_cols = {}
-                        
-            for req in required_pole_cols:
-                matches = [col for col in pole_df.columns if req.lower() in col.lower()]
-                if matches:
-                    available_pole_cols[req] = matches[0]
-                else:
-                    st.error(f"Column '{req}' not found in pole CSV. Available columns: {list(pole_df.columns)}")
-                    pole_df = None
-                    break
-                        
-            if pole_df is not None:
-                # Extract pole data
-                pole_easting = pole_df[available_pole_cols['Easting']].values
-                pole_northing = pole_df[available_pole_cols['Northing']].values
-                pole_names = pole_df[available_pole_cols['Name']].values
-                            
-                # Find nearest distance to GPR line for each pole
-                gpr_easting = st.session_state.interpolated_coords['easting']
-                gpr_northing = st.session_state.interpolated_coords['northing']
-                gpr_distance = st.session_state.interpolated_coords['distance']
-                            
-                pole_projected_distances = []
-                pole_min_distances = []
-                            
-                for i in range(len(pole_easting)):
-                    # Calculate distance to each GPR point
-                    distances = np.sqrt((gpr_easting - pole_easting[i])**2 + 
-                                                (gpr_northing - pole_northing[i])**2)
-                    min_idx = np.argmin(distances)
-                    min_dist = distances[min_idx]
-                    projected_dist = gpr_distance[min_idx]
-                                
-                    pole_projected_distances.append(projected_dist)
-                    pole_min_distances.append(min_dist)
-                            
-                # Filter poles within reasonable distance (e.g., 10m from line)
-                max_distance_threshold = st.slider("Max distance from GPR line (m)", 1.0, 50.0, 10.0, 1.0)
-                            
-                filtered_indices = [i for i, d in enumerate(pole_min_distances) if d <= max_distance_threshold]
-                            
-                if filtered_indices:
-                    pole_data = {
-                        'easting': pole_easting[filtered_indices],
-                        'northing': pole_northing[filtered_indices],
-                        'names': pole_names[filtered_indices],
-                        'projected_distances': np.array(pole_projected_distances)[filtered_indices],
-                        'min_distances': np.array(pole_min_distances)[filtered_indices]
-                        }
-                    st.info(f"Found {len(filtered_indices)} poles within {max_distance_threshold}m of GPR line")
-                else:
-                    st.warning(f"No poles found within {max_distance_threshold}m of GPR line")
-        except Exception as e:
-            st.error(f"Error loading pole CSV: {str(e)}")
-                    
+    
     st.markdown("---")            
     st.header("🗺️ Coordinate Import (Optional)")
     
@@ -2403,121 +2336,6 @@ if st.session_state.data_loaded:
                        c=st.session_state.interpolated_coords['distance'], 
                        cmap='viridis', s=20, alpha=0.8)
             
-            # Plot electric poles if available
-            if pole_data is not None:
-                for i in range(len(pole_data['easting'])):
-                    if 'TS' in str(pole_data['names'][i]):
-                        color = 'red'
-                        marker = '^'
-                        label = 'TS Pole'
-                    elif 'TL' in str(pole_data['names'][i]):
-                        color = 'purple'
-                        marker = '^'
-                        label = 'TL Pole'
-                    else:
-                        color = 'orange'
-                        marker = 'o'
-                        label = 'CPT'
-                    
-                    ax1.scatter(pole_data['easting'][i], pole_data['northing'][i], 
-                               c=color, marker=marker, s=100, edgecolor='black', 
-                               linewidth=1, alpha=0.8, label=label if i == 0 else "")
-            
-            ax1.set_xlabel('Easting (m)')
-            ax1.set_ylabel('Northing (m)')
-            ax1.set_title('Plan View - Survey Line with Electric Poles')
-            ax1.grid(True, alpha=0.3)
-            ax1.axis('equal')
-            
-            # Create legend for poles
-            from matplotlib.patches import Patch
-            legend_elements = [
-                Patch(facecolor='red', alpha=0.8, label='TS Pole (Triangle)'),
-                Patch(facecolor='purple', alpha=0.8, label='TL Pole (Triangle)'),
-                Patch(facecolor='orange', alpha=0.8, label='Other Pole')
-            ]
-            ax1.legend(handles=legend_elements, loc='upper right')
-            
-            plt.colorbar(ax1.collections[0], ax=ax1, label='Distance along profile (m)')
-            
-            # 2. Elevation profile with pole markers
-            ax2.plot(st.session_state.interpolated_coords['distance'], 
-                    st.session_state.interpolated_coords['elevation'], 
-                    'g-', linewidth=2, alpha=0.8)
-            ax2.fill_between(st.session_state.interpolated_coords['distance'],
-                            st.session_state.interpolated_coords['elevation'].min(),
-                            st.session_state.interpolated_coords['elevation'],
-                            alpha=0.3, color='green')
-            
-            # Mark pole locations on elevation profile
-            if pole_data is not None:
-                # Get elevation at pole projected distances
-                from scipy.interpolate import interp1d
-                elev_interp = interp1d(st.session_state.interpolated_coords['distance'],
-                                      st.session_state.interpolated_coords['elevation'],
-                                      kind='linear', fill_value='extrapolate')
-                
-                for i in range(len(pole_data['projected_distances'])):
-                    pole_elev = elev_interp(pole_data['projected_distances'][i])
-                    if 'TS' in str(pole_data['names'][i]):
-                        color = 'red'
-                        marker = '^'
-                    elif 'TL' in str(pole_data['names'][i]):
-                        color = 'purple'
-                        marker = '^'
-                    else:
-                        color = 'orange'
-                        marker = 'o'
-                    
-                    ax2.scatter(pole_data['projected_distances'][i], pole_elev,
-                               c=color, marker=marker, s=80, edgecolor='black', 
-                               linewidth=1, alpha=0.8, zorder=5)
-                    ax2.text(pole_data['projected_distances'][i], pole_elev + 0.5,
-                            pole_data['names'][i], fontsize=8, ha='center')
-            
-            ax2.set_xlabel('Distance along profile (m)')
-            ax2.set_ylabel('Elevation (m)')
-            ax2.set_title('Elevation Profile with Electric Poles')
-            ax2.grid(True, alpha=0.3)
-            
-            # 3. 3D view of survey line with poles
-            from mpl_toolkits.mplot3d import Axes3D
-            ax3 = fig_coords.add_subplot(2, 2, 3, projection='3d')
-            ax3.plot(st.session_state.interpolated_coords['easting'],
-                    st.session_state.interpolated_coords['northing'],
-                    st.session_state.interpolated_coords['elevation'],
-                    'b-', linewidth=1, alpha=0.7)
-            scatter = ax3.scatter(st.session_state.interpolated_coords['easting'],
-                                 st.session_state.interpolated_coords['northing'],
-                                 st.session_state.interpolated_coords['elevation'],
-                                 c=st.session_state.interpolated_coords['distance'],
-                                 cmap='viridis', s=20, alpha=0.8)
-            
-            # Add poles to 3D view
-            if pole_data is not None:
-                for i in range(len(pole_data['easting'])):
-                    if 'TS' in str(pole_data['names'][i]):
-                        color = 'red'
-                        marker = '^'
-                    elif 'TL' in str(pole_data['names'][i]):
-                        color = 'purple'
-                        marker = '^'
-                    else:
-                        color = 'orange'
-                        marker = 'o'
-                    
-                    ax3.scatter(pole_data['easting'][i], 
-                               pole_data['northing'][i],
-                               elev_interp(pole_data['projected_distances'][i]),
-                               c=color, marker=marker, s=100, edgecolor='black', 
-                               linewidth=1, alpha=0.8)
-            
-            ax3.set_xlabel('Easting (m)')
-            ax3.set_ylabel('Northing (m)')
-            ax3.set_zlabel('Elevation (m)')
-            ax3.set_title('3D Survey Line with Electric Poles')
-            plt.colorbar(scatter, ax=ax3, label='Distance (m)')
-            
             # 4. GPR data with coordinate-based X-axis
             # Determine aspect ratio for this plot
             aspect_value_coords = get_aspect_ratio(
@@ -2590,72 +2408,7 @@ if st.session_state.data_loaded:
             ax_elev.fill_between(st.session_state.interpolated_coords['distance'],
                                 Y_elev.min(), st.session_state.interpolated_coords['elevation'],
                                 alpha=0.1, color='gray')
-            
-            # Mark electric poles on the surface
-            if pole_data is not None:
-                for i in range(len(pole_data['projected_distances'])):
-                    pole_elev = elev_interp(pole_data['projected_distances'][i])
-                    if 'TS' in str(pole_data['names'][i]):
-                        color = 'red'
-                        marker = '^'
-                        label = 'TS Pole'
-                    elif 'TL' in str(pole_data['names'][i]):
-                        color = 'green'
-                        marker = '^'
-                        label = 'TL Pole'
-                    else:
-                        color = 'orange'
-                        marker = 'o'
-                        label = 'CPT'
-                    
-                    # Plot pole at surface elevation
-                    ax_elev.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
-                                   c=color, marker=marker, s=100, 
-                                    alpha=0.9, zorder=10)
-                    
-                    # Add vertical dashed line from pole to bottom of plot
-                    #ax_elev.plot([pole_data['projected_distances'][i], pole_data['projected_distances'][i]],
-                     #           [pole_elev, Y_elev.min()],
-                      #          color=color, linestyle='--', alpha=0.5, linewidth=1)
-                    
-                    # Add pole name
-                    ax_elev.text(pole_data['projected_distances'][i], pole_elev + 1,
-                                pole_data['names'][i], fontsize=6, ha='center')
-                
-                # Create custom legend for poles
-                from matplotlib.lines import Line2D
-                legend_elements = [
-                    Line2D([0], [0], marker='^', color='w', markerfacecolor='red', 
-                          markersize=10, label='TS Pole'),
-                    Line2D([0], [0], marker='^', color='w', markerfacecolor='purple', 
-                          markersize=10, label='TL Pole'),
-                    Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', 
-                          markersize=10, label='Other Pole'),
-                    Line2D([0], [0], color='k', linewidth=2, label='Surface'),
-                    Line2D([0], [0], color='gray', alpha=0.1, linewidth=10, label='Subsurface')
-                ]
-                ax_elev.legend(handles=legend_elements, loc='upper right')
-            
-            ax_elev.legend()
-            ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
-            
-            plt.tight_layout()
-            st.pyplot(fig_elev)
-            
-            # Display pole information table
-            if pole_data is not None:
-                st.subheader("Electric Pole Information")
-                pole_info_df = pd.DataFrame({
-                    'Name': pole_data['names'],
-                    'Easting (m)': pole_data['easting'],
-                    'Northing (m)': pole_data['northing'],
-                    'Distance along profile (m)': pole_data['projected_distances'],
-                    'Distance from GPR line (m)': pole_data['min_distances'],
-                    'Type': ['TS' if 'TS' in str(name) else 'TL' if 'TL' in str(name) else 'Other' 
-                            for name in pole_data['names']]
-                })
-                st.dataframe(pole_info_df.sort_values('Distance along profile (m)'))
-            
+    
             # Export coordinates
             st.subheader("Export Interpolated Coordinates")
             
@@ -3300,6 +3053,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
