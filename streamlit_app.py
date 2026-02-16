@@ -1084,35 +1084,34 @@ with st.sidebar:
         try:
             pole_df = pd.read_csv(pole_csv)
             st.success(f"Loaded {len(pole_df)} electric pole locations")
-                        
+            
+            # Column mapping (as before)
             required_pole_cols = ['Easting', 'Northing', 'Name']
             available_pole_cols = {}
-                        
             for req in required_pole_cols:
                 matches = [col for col in pole_df.columns if req.lower() in col.lower()]
                 if matches:
                     available_pole_cols[req] = matches[0]
                 else:
-                    st.error(f"Column '{req}' not found in pole CSV. Available columns: {list(pole_df.columns)}")
+                    st.error(f"Column '{req}' not found. Available: {list(pole_df.columns)}")
                     pole_df = None
                     break
-                        
+            
             if pole_df is not None:
                 pole_easting = pole_df[available_pole_cols['Easting']].values
                 pole_northing = pole_df[available_pole_cols['Northing']].values
                 pole_names = pole_df[available_pole_cols['Name']].values
                 
-                # We'll process poles after data is loaded
-                # Store raw pole data for later processing
+                # Store raw pole data in session state
                 st.session_state.raw_pole_data = {
                     'easting': pole_easting,
                     'northing': pole_northing,
                     'names': pole_names
                 }
                 
+                
         except Exception as e:
             st.error(f"Error loading pole CSV: {str(e)}")
-    
     st.markdown("---")            
     st.header("🗺️ Coordinate Import (Optional)")
     
@@ -1848,31 +1847,30 @@ if dzt_file and process_btn:
                             st.warning(f"Coordinate processing failed: {str(e)}")
                     
                     # Process pole data if available
+                    # Process pole data if available
                     if hasattr(st.session_state, 'raw_pole_data') and st.session_state.interpolated_coords is not None:
                         raw_pole = st.session_state.raw_pole_data
-                        
-                        # Find nearest distance to GPR line for each pole
+                        max_dist_threshold = st.session_state.get('pole_max_distance', 10.0)  # default 10m
+                    
                         gpr_easting = st.session_state.interpolated_coords['easting']
                         gpr_northing = st.session_state.interpolated_coords['northing']
                         gpr_distance = st.session_state.interpolated_coords['distance']
-                        
+                    
                         pole_projected_distances = []
                         pole_min_distances = []
-                        
+                    
                         for i in range(len(raw_pole['easting'])):
                             distances = np.sqrt((gpr_easting - raw_pole['easting'][i])**2 + 
-                                               (gpr_northing - raw_pole['northing'][i])**2)
+                                                (gpr_northing - raw_pole['northing'][i])**2)
                             min_idx = np.argmin(distances)
                             min_dist = distances[min_idx]
                             projected_dist = gpr_distance[min_idx]
-                            
+                    
                             pole_projected_distances.append(projected_dist)
                             pole_min_distances.append(min_dist)
-                        
-                        max_distance_threshold = st.slider("Max distance from GPR line (m)", 1.0, 50.0, 10.0, 1.0, key="pole_dist")
-                        
-                        filtered_indices = [i for i, d in enumerate(pole_min_distances) if d <= max_distance_threshold]
-                        
+                    
+                        filtered_indices = [i for i, d in enumerate(pole_min_distances) if d <= max_dist_threshold]
+                    
                         if filtered_indices:
                             pole_data = {
                                 'easting': raw_pole['easting'][filtered_indices],
@@ -1881,9 +1879,8 @@ if dzt_file and process_btn:
                                 'projected_distances': np.array(pole_projected_distances)[filtered_indices],
                                 'min_distances': np.array(pole_min_distances)[filtered_indices]
                             }
-                            st.info(f"Found {len(filtered_indices)} poles within {max_distance_threshold}m of GPR line")
+                            st.info(f"Found {len(filtered_indices)} poles within {max_dist_threshold}m of GPR line")
                             st.session_state.pole_data = pole_data
-                    
                     progress_bar.progress(90)
                     
                     st.session_state.header = header
@@ -2240,3 +2237,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
