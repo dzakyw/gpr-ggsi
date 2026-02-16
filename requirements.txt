@@ -7,4 +7,3 @@ matplotlib
 scipy
 scikit-learn
 Pillow
-git+https://github.com/iannesbitt/readgssi
