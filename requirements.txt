@@ -1,6 +1,5 @@
 setuptools
 wheel
-pip
 streamlit
 numpy
 pandas
@@ -9,9 +8,6 @@ obspy
 numpy
 scipy
 pandas
-h5py
-pynmea2
-geopy
-pytz
 scikit-learn
 Pillow
+
