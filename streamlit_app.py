@@ -4,7 +4,7 @@ Created on Thu Feb  5 18:39:39 2026
 
 @author: asus
 """
-import readgssi
+from readgssi import readgssi
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -3293,6 +3293,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
