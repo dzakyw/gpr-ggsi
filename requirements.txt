@@ -9,7 +9,9 @@ geopy
 pytz
 pandas 
 h5py 
+readgssi
 obspy
 plotly
+
 
 
