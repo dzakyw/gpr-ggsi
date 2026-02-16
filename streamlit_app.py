@@ -1447,8 +1447,8 @@ if dzt_file and process_btn:
             try:
                 from readgssi import readgssi
             except ImportError as e:
-            st.error(f"⚠️ Failed to import readgssi: {e}")
-            st.stop()
+                st.error(f"⚠️ Failed to import readgssi: {e}")
+                st.stop()
             
             # Create progress bar
             progress_bar = st.progress(0)
@@ -3293,6 +3293,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
