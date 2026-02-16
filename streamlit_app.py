@@ -8,6 +8,7 @@ Created on Thu Feb  5 18:39:39 2026
 import streamlit as st
 import numpy as np
 import pandas as pd
+import struct
 import matplotlib.pyplot as plt
 import tempfile
 import os
@@ -2374,4 +2375,5 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
