@@ -25,6 +25,7 @@ from matplotlib.patches import Patch
 
 warnings.filterwarnings('ignore')
 
+!pip install ~/readgssi
 # Set page config
 st.set_page_config(
     page_title="GPR Data Processor",
@@ -3294,6 +3295,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
