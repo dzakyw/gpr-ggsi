@@ -7,3 +7,13 @@ matplotlib
 scipy
 scikit-learn
 Pillow
+obspy
+matplotlib
+numpy
+scipy
+pandas
+h5py
+pynmea2
+geopy
+pytz
+
