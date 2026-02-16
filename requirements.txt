@@ -1,4 +1,4 @@
-setuptools>=65
+setuptools
 wheel
 pip
 streamlit
@@ -17,6 +17,7 @@ geopy
 pytz
 scikit-learn
 Pillow
+
 
 
 
