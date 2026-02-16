@@ -1,4 +1,5 @@
-streamlit 
+setuptools
+wheel
 obspy
 numpy
 scipy
@@ -12,6 +13,7 @@ h5py
 git+https://github.com/iannesbitt/readgssi
 obspy
 plotly
+
 
 
 
