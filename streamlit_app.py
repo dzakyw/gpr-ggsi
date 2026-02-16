@@ -22,7 +22,8 @@ from scipy.linalg import toeplitz, solve_toeplitz
 from scipy.optimize import minimize
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-
+import sys
+st.write(sys.version)
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -3294,6 +3295,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
