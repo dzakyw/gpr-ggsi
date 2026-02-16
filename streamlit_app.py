@@ -26,107 +26,6 @@ warnings.filterwarnings('ignore')
 import struct
 from scipy.signal import butter, filtfilt
 
-def read_dzt(filepath, time_zero=0, stacking='none', stack_value=None,
-             bgr=False, bgr_type='Full-width', bgr_window=100,
-             freq_filter=False, freq_min=60, freq_max=130, verbose=False):
-    """
-    Read a GSSI DZT file and apply basic processing similar to readgssi.
-    Returns (header_dict, [data_array], gps_info) where gps_info is None.
-    """
-    with open(filepath, 'rb') as f:
-        # Read header (first 1024 bytes)
-        header_bytes = f.read(1024)
-        if len(header_bytes) < 1024:
-            raise ValueError("File too short – invalid DZT file")
-
-        # Check RH tag (offset 0-1)
-        rh_tag = struct.unpack('<2s', header_bytes[0:2])[0]
-        if rh_tag != b'RH':
-            # Some files have a different header start; fallback to standard offsets
-            # but we assume standard for simplicity.
-            pass
-
-        # Extract essential header fields (see GSSI DZT format documentation)
-        n_samples = struct.unpack('<H', header_bytes[14:16])[0]          # samples per trace
-        n_traces  = struct.unpack('<H', header_bytes[20:22])[0]         # number of traces
-        bits_per_sample = struct.unpack('<H', header_bytes[22:24])[0]   # usually 16
-        dtype = np.int16 if bits_per_sample == 16 else np.int8
-
-        # Optional: antenna frequency (not always present; we'll set a default)
-        ant_freq = 400  # MHz placeholder – you can try to extract from header if available
-
-        # Read the rest of the file (data)
-        data_bytes = f.read()
-
-    # Verify data size
-    expected_bytes = n_samples * n_traces * (bits_per_sample // 8)
-    if len(data_bytes) != expected_bytes:
-        # Truncate or pad? We'll truncate.
-        data_bytes = data_bytes[:expected_bytes]
-
-    # Convert to numpy array (traces are stored column-wise)
-    data = np.frombuffer(data_bytes, dtype=dtype).reshape(n_samples, n_traces, order='F')
-    data = data.astype(np.float32)   # convert to float for later processing
-
-    # --- Apply time-zero adjustment ---
-    if time_zero > 0:
-        data = data[time_zero:, :]          # trim from top
-        n_samples = data.shape[0]
-
-    # --- Apply stacking (horizontal averaging) ---
-    if stacking == 'manual' and stack_value and stack_value > 1:
-        # Average every 'stack_value' traces
-        n_traces_new = n_traces // stack_value
-        if n_traces_new > 0:
-            # Reshape and average
-            data = data[:, :n_traces_new * stack_value].reshape(
-                n_samples, n_traces_new, stack_value).mean(axis=2)
-            n_traces = n_traces_new
-        # If auto stacking, you'd need to detect similar traces – skip for simplicity
-
-    # --- Apply background removal ---
-    if bgr:
-        if bgr_type == 'Full-width':
-            # Subtract the average trace
-            avg_trace = data.mean(axis=1, keepdims=True)
-            data = data - avg_trace
-        else:  # Boxcar – moving average background removal
-            from scipy.ndimage import uniform_filter1d
-            # Smooth along trace axis (horizontal) and subtract
-            # This is a simple implementation; adjust as needed.
-            background = uniform_filter1d(data, size=bgr_window, axis=1, mode='nearest')
-            data = data - background
-
-    # --- Apply frequency filter (bandpass) ---
-    if freq_filter and freq_min and freq_max:
-        # Design Butterworth bandpass filter
-        nyquist = 0.5 * 1000  # sampling rate in MHz? We need actual sampling rate.
-        # We'll assume sampling rate is 2 * max frequency of antenna or use a default.
-        # For simplicity, we'll skip if we can't determine sampling rate.
-        # You could try to extract sampling frequency from header (not always present).
-        # We'll provide a placeholder – maybe use a fixed sampling rate of 2000 MHz.
-        fs = 100  # MHz – adjust based on your data
-        low = freq_min / (0.5 * fs)
-        high = freq_max / (0.5 * fs)
-        if low < 1 and high < 1:
-            b, a = butter(4, [low, high], btype='band')
-            # Apply filter to each trace
-            data = filtfilt(b, a, data, axis=0)
-
-    # --- Build a header dictionary that mimics readgssi's output ---
-    header = {
-        'system': 'GSSI',                    # placeholder
-        'ant_freq': ant_freq,
-        'spt': n_samples,
-        'ntraces': n_traces,
-        'bits_per_sample': bits_per_sample,
-        'time_window_ns': struct.unpack('<f', header_bytes[36:40])[0] if len(header_bytes) >= 40 else None,
-        'samples_per_meter': struct.unpack('<f', header_bytes[32:36])[0] if len(header_bytes) >= 36 else None,
-        'rh_tag': rh_tag
-    }
-
-    # Return in the same format as readgssi: (header, [data], gps)
-    return header, [data], None
 # Set page config
 st.set_page_config(
     page_title="GPR Data Processor",
@@ -1546,29 +1445,35 @@ def get_window_indices(x_axis, y_axis, depth_min, depth_max, distance_min, dista
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
         try:
+            # Try to import readgssi
+            try:
+                from readgssi import readgssi
+            except ImportError:
+                st.error("⚠️ readgssi not installed! Please run:")
+                st.code("pip install readgssi")
+                st.stop()
+            
             # Create progress bar
             progress_bar = st.progress(0)
-
+            
             # Save files to temp location
             with tempfile.TemporaryDirectory() as tmpdir:
                 progress_bar.progress(10)
-
+                
                 # Save DZT
                 dzt_path = os.path.join(tmpdir, "input.dzt")
                 with open(dzt_path, "wb") as f:
                     f.write(dzt_file.getbuffer())
-
-                # Save DZG if provided (we'll ignore GPS for now)
+                
+                # Save DZG if provided
                 dzg_path = None
                 if dzg_file:
                     dzg_path = os.path.join(tmpdir, "input.dzg")
                     with open(dzg_path, "wb") as f:
                         f.write(dzg_file.getbuffer())
-                    st.info("DZG file uploaded – GPS data not processed in this version.")
-                    # You could implement DZG parsing later if needed
-
+                
                 progress_bar.progress(30)
-
+                
                 # Process coordinates if provided
                 coordinates_data = None
                 if coord_csv:
@@ -1579,28 +1484,38 @@ if dzt_file and process_btn:
                     except Exception as e:
                         st.warning(f"Could not read CSV coordinates: {str(e)}")
                         coord_csv = None
-
+                
                 progress_bar.progress(40)
-
-                # Read DZT file with our custom function, applying processing parameters
-                header, arrays, gps = read_dzt(
-                    dzt_path,
-                    time_zero=time_zero,
-                    stacking=stacking,
-                    stack_value=stack_value if stacking == 'manual' else None,
-                    bgr=bgr,
-                    bgr_type=bgr_type if bgr else None,
-                    bgr_window=bgr_window if bgr and bgr_type == 'Boxcar' else None,
-                    freq_filter=freq_filter,
-                    freq_min=freq_min if freq_filter else None,
-                    freq_max=freq_max if freq_filter else None
-                )
-
-                progress_bar.progress(70)
-
-                # Store original array (arrays[0] is the processed data)
-                original_array = arrays[0]
-                # ... rest of your code (line reversal, muting, near‑surface correction, etc.) remains unchanged
+                
+                # Build parameters for readgssi
+                params = {
+                    'infile': dzt_path,
+                    'zero': [time_zero],
+                    'verbose': False
+                }
+                
+                # Add stacking
+                if stacking == "auto":
+                    params['stack'] = 'auto'
+                elif stacking == "manual":
+                    params['stack'] = stack_value
+                
+                # Add BGR
+                if bgr:
+                    if bgr_type == "Full-width":
+                        params['bgr'] = 0
+                    else:
+                        params['bgr'] = bgr_window
+                
+                # Add frequency filter
+                if freq_filter:
+                    params['freqmin'] = freq_min
+                    params['freqmax'] = freq_max
+                
+                progress_bar.progress(50)
+                
+                # Read data
+                header, arrays, gps = readgssi.readgssi(**params)
                 
                 progress_bar.progress(70)
                 
@@ -3381,6 +3296,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
