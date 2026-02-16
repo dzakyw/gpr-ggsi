@@ -9,9 +9,10 @@ geopy
 pytz
 pandas 
 h5py 
-readgssi
+git+https://github.com/iannesbitt/readgssi
 obspy
 plotly
+
 
 
 
