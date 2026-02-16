@@ -1,13 +1,12 @@
 from datetime import datetime
 from readgssi.__init__ import __version__, name
-import pkg_resources
 import readgssi.plot as plot
 
 """
 This module contains some things readgssi needs to operate, both command line and python-related.
 """
-
-dist = pkg_resources.get_distribution(name)
+dist = None
+__version__ = "local"
 year = datetime.now().year
 author = 'Ian Nesbitt'
 affil = 'School of Earth and Climate Sciences, University of Maine'
