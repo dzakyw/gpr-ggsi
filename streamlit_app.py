@@ -23,10 +23,6 @@ from scipy.optimize import minimize
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 import importlib.util
-if importlib.util.find_spec("readgssi") is None:
-    st.error("readgssi is not installed in this environment.")
-    st.stop()
-
 import sys
 st.write(sys.version)
 warnings.filterwarnings('ignore')
@@ -3304,6 +3300,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
