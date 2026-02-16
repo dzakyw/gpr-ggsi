@@ -22,7 +22,6 @@ from scipy.linalg import toeplitz, solve_toeplitz
 from scipy.optimize import minimize
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -1446,8 +1445,9 @@ if dzt_file and process_btn:
             # Try to import readgssi
             try:
                 from readgssi import readgssi
-            except ImportError as e:
-                st.error(f"⚠️ Failed to import readgssi: {e}")
+            except ImportError:
+                st.error("⚠️ readgssi not installed! Please run:")
+                st.code("pip install readgssi")
                 st.stop()
             
             # Create progress bar
@@ -1483,7 +1483,6 @@ if dzt_file and process_btn:
                         coord_csv = None
                 
                 progress_bar.progress(40)
-                
                 # Build parameters for readgssi
                 params = {
                     'infile': dzt_path,
@@ -3293,6 +3292,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
