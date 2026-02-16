@@ -4,7 +4,6 @@ numpy
 scipy
 matplotlib
 pandas
-readgssi
 h5py
 geopy
 pytz
@@ -12,4 +11,5 @@ pandas
 h5py 
 obspy
 plotly
+
 
