@@ -1,6 +1,6 @@
 setuptools>=65
 wheel
-pip = 26.0.1
+pip
 streamlit
 numpy
 pandas
@@ -17,6 +17,7 @@ geopy
 pytz
 scikit-learn
 Pillow
+
 
 
 
