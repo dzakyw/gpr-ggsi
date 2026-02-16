@@ -11,12 +11,12 @@ matplotlib
 numpy
 scipy
 pandas
-pkg_resources
 h5py
 pynmea2
 geopy
 pytz
 scikit-learn
 Pillow
+
 
 
