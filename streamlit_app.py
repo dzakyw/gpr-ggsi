@@ -2388,7 +2388,7 @@ if st.session_state.data_loaded:
                 st.metric("Avg Trace Spacing", f"{avg_spacing:.2f} m")
                 st.metric("Profile Bearing", 
                          f"{np.degrees(np.arctan2(st.session_state.interpolated_coords['northing'][-1] - st.session_state.interpolated_coords['northing'][0], 
-                                                  st.session_state.interpolated_coords['easting'][-1] - st.session_state.interpolated_coords['easting'][0])):.1f}°")
+                                                  st.session_state.interpolated_coords['easting'][-1] - st.session_state.interpolated_coords['easting'][0])):.1f}")
             
             with col4:
                 slope = (st.session_state.interpolated_coords['elevation'][-1] - st.session_state.interpolated_coords['elevation'][0]) / st.session_state.interpolated_coords['distance'][-1]
@@ -3304,6 +3304,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
