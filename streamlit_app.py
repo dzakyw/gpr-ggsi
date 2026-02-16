@@ -1444,13 +1444,17 @@ def get_window_indices(x_axis, y_axis, depth_min, depth_max, distance_min, dista
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
         try:
-            # Try to import readgssi
-            try:
-                from readgssi import readgssi
-            except ImportError:
-                st.error("⚠️ readgssi not installed! Please run:")
-                st.code("pip install readgssi")
-                st.stop()
+            from readgssi import readgssi
+            st.session_state.readgssi_available = True
+        except Exception as e:
+            st.session_state.readgssi_available = False
+            st.error("⚠️ readgssi failed to import.")
+            st.write("Error details:", str(e))
+            import sys
+            st.write("Python executable:", sys.executable)
+            st.write("Python version:", sys.version)
+            st.stop()
+
             
             # Create progress bar
             progress_bar = st.progress(0)
@@ -3295,6 +3299,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
