@@ -105,7 +105,7 @@ def read_dzt(filepath, time_zero=0, stacking='none', stack_value=None,
         # For simplicity, we'll skip if we can't determine sampling rate.
         # You could try to extract sampling frequency from header (not always present).
         # We'll provide a placeholder – maybe use a fixed sampling rate of 2000 MHz.
-        fs = 2000  # MHz – adjust based on your data
+        fs = 100  # MHz – adjust based on your data
         low = freq_min / (0.5 * fs)
         high = freq_max / (0.5 * fs)
         if low < 1 and high < 1:
@@ -3381,6 +3381,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
