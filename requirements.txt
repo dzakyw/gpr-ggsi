@@ -1,6 +1,5 @@
 streamlit 
 obspy
-python==3.7
 numpy
 scipy
 matplotlib
@@ -13,6 +12,7 @@ h5py
 git+https://github.com/iannesbitt/readgssi
 obspy
 plotly
+
 
 
 
