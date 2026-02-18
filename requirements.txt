@@ -1,4 +1,4 @@
-setuptools
+setuptools<81
 wheel
 streamlit
 numpy
@@ -10,4 +10,5 @@ scipy
 pandas
 scikit-learn
 Pillow
+
 
