@@ -2466,7 +2466,7 @@ if st.session_state.data_loaded:
                     ax2.scatter(pole_data['projected_distances'][i], pole_elev,
                                c=color, marker=marker, s=80, edgecolor='black', 
                                linewidth=1, alpha=0.8, zorder=5)
-                    ax2.text(pole_data['projected_distances'][i], pole_elev + 0.5,
+                    ax2.text(pole_data['projected_distances'][i], pole_elev,
                             pole_data['names'][i], fontsize=8, ha='center')
             
             ax2.set_xlabel('Distance along profile (m)')
@@ -3294,6 +3294,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
