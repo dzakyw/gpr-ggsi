@@ -1944,7 +1944,7 @@ if st.session_state.data_loaded:
             interpolation = st.selectbox("Interpolation", ["none", "bilinear", "bicubic", "gaussian"], key="full_interp")
         
         with col2:
-            colormap = st.selectbox("Colormap", ["seismic", "RdBu", "gray", "viridis", "jet", "coolwarm"], key="full_cmap")
+            colormap = st.selectbox("Colormap", ["grey", "RdBu", "gray", "viridis", "jet", "coolwarm"], key="full_cmap")
             aspect_display = st.selectbox("Display Aspect", ["auto", "equal", 0.1, 0.2, 0.5, 1.0, 2.0, 5.0], 
                                          index=0, key="full_display_aspect")
         
@@ -2118,7 +2118,7 @@ if st.session_state.data_loaded:
             im1_window = ax1_window.imshow(window_data_original,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
-                                          aspect='auto', cmap='seismic')
+                                          aspect='auto', cmap='grey')
             
             ax1_window.set_xlabel(x_label)
             ax1_window.set_ylabel(y_label)
@@ -2132,7 +2132,7 @@ if st.session_state.data_loaded:
             im2_window = ax2_window.imshow(window_data,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
-                                          aspect='auto', cmap='seismic')
+                                          aspect='auto', cmap='grey')
             
             ax2_window.set_xlabel(x_label)
             ax2_window.set_ylabel(y_label)
@@ -2167,7 +2167,7 @@ if st.session_state.data_loaded:
                 im = ax.imshow(window_data,
                              extent=[x_axis_window[0], x_axis_window[-1], 
                                      y_axis_window[-1], y_axis_window[0]],
-                             aspect='auto', cmap='seismic')
+                             aspect='auto', cmap='grey')
                 
                 ax.set_xlabel(x_label)
                 ax.set_ylabel(y_label)
@@ -2212,7 +2212,7 @@ if st.session_state.data_loaded:
                         im = ax.imshow(win_data,
                                      extent=[x_axis_win[0], x_axis_win[-1], 
                                              y_axis_win[-1], y_axis_win[0]],
-                                     aspect='auto', cmap='seismic')
+                                     aspect='auto', cmap='grey')
                         
                         ax.set_xlabel(x_label)
                         ax.set_ylabel(y_label)
@@ -2532,7 +2532,7 @@ if st.session_state.data_loaded:
                           extent=[st.session_state.interpolated_coords['distance'][0],
                                  st.session_state.interpolated_coords['distance'][-1],
                                  depth_axis[-1], depth_axis[0]],
-                          aspect=aspect_value_coords, cmap='seismic', alpha=0.9)
+                          aspect=aspect_value_coords, cmap='grey', alpha=0.9)
             ax4.set_xlabel('Distance along profile (m)')
             ax4.set_ylabel(f'Depth ({st.session_state.depth_unit})')
             ax4.set_title(f'GPR Data with Coordinate Scaling (Aspect: {aspect_value_coords})')
@@ -2569,7 +2569,7 @@ if st.session_state.data_loaded:
             
             # Use pcolormesh for elevation-adjusted display
             mesh = ax_elev.pcolormesh(X, Y_elev, st.session_state.processed_array,vmin=vmin_plot, vmax=vmax_plot,
-                                     cmap='seismic', shading='auto', alpha=0.9)
+                                     cmap='grey', shading='auto', alpha=0.9)
             
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
@@ -3068,7 +3068,7 @@ if st.session_state.data_loaded:
                 im = ax.imshow(st.session_state.processed_array,
                              extent=[x_axis_export[0], x_axis_export[-1], 
                                     y_axis_export[-1], y_axis_export[0]],
-                             aspect='auto', cmap='seismic')
+                             aspect='auto', cmap='grey')
                 ax.set_xlabel(x_label_export)
                 ax.set_ylabel(y_label_export)
                 
@@ -3114,7 +3114,7 @@ if st.session_state.data_loaded:
                     im = ax.imshow(window_data,
                                  extent=[x_axis_window[0], x_axis_window[-1], 
                                          y_axis_window[-1], y_axis_window[0]],
-                                 aspect='auto', cmap='seismic')
+                                 aspect='auto', cmap='grey')
                     ax.set_xlabel(x_label)
                     ax.set_ylabel(y_label)
                     ax.set_title(f"GPR Data - Custom Window\n"
@@ -3294,6 +3294,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
