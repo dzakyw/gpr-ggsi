@@ -1517,14 +1517,6 @@ if dzt_file and process_btn:
                         params['bgr'] = bgr_window
                 
                 # Add frequency filter
-                if freq_filter:
-                   
-                    
-                    params['freqmin'] = freq_min
-                    params['freqmax'] = freq_max
-                
-                progress_bar.progress(50)
-                
                 # Read data
                 header, arrays, gps = readgssi.readgssi(**params)
                 
@@ -3347,6 +3339,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
