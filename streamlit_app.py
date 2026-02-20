@@ -22,7 +22,7 @@ from scipy.linalg import toeplitz, solve_toeplitz
 from scipy.optimize import minimize
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
-
+from readgssi import readgssi
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -620,25 +620,14 @@ with st.sidebar:
         if bgr_type == "Boxcar":
             bgr_window = st.slider("Boxcar Window", 10, 500, 100)
     
-    freq_filter = st.checkbox("Apply Frequency Filter (FIR)", False)
+    freq_filter = st.checkbox("Apply Frequency Filter", False)
     if freq_filter:
-        st.markdown('<div class="deconv-box">', unsafe_allow_html=True)
-        st.subheader("FIR Bandpass Filter Settings")
         col1, col2 = st.columns(2)
         with col1:
             freq_min = st.number_input("Min Freq (MHz)", 10, 500, 60)
-            fir_order = st.slider("Filter Order (taps)", 10, 501, 101, step=2,
-                                   help="Number of filter taps (should be < trace length)")
         with col2:
             freq_max = st.number_input("Max Freq (MHz)", 10, 1000, 130)
-            fir_window = st.selectbox("Window Type",
-                                      ["hamming", "hann", "blackman", "bartlett", "kaiser"],
-                                      help="Window function for FIR design")
-        
-        zero_phase = st.checkbox("Zero-phase filtering (filtfilt)", True,
-                                  help="Apply filter forward and backward to eliminate phase shift")
-        st.markdown('</div>', unsafe_allow_html=True)
-        
+    
     process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
 
 # Helper functions for deconvolution
@@ -1517,6 +1506,12 @@ if dzt_file and process_btn:
                         params['bgr'] = bgr_window
                 
                 # Add frequency filter
+                if freq_filter:
+                    params['freqmin'] = freq_min
+                    params['freqmax'] = freq_max
+                
+                progress_bar.progress(50)
+                
                 # Read data
                 header, arrays, gps = readgssi.readgssi(**params)
                 
@@ -1525,47 +1520,7 @@ if dzt_file and process_btn:
                 # Store original array
                 if arrays and len(arrays) > 0:
                     original_array = arrays[0]
-                
-                    # ========== NEW: FIR FILTER ==========
-                    if freq_filter:   # this is the same checkbox you kept in the sidebar
-                        # Get sampling frequency from header (Hz)
-                        fs_hz = header.get('freq', 1000e6)   # default to 1 GHz if missing
-                        fs_mhz = fs_hz / 1e6                  # convert to MHz
-                
-                        # Normalized cutoff frequencies (0 to 1, where 1 = Nyquist = fs/2)
-                        nyquist = fs_mhz / 2
-                        low = freq_min / nyquist
-                        high = freq_max / nyquist
-                
-                        # Safety: keep cutoffs inside (0,1)
-                        low = max(0.001, min(low, 0.999))
-                        high = max(low + 0.001, min(high, 0.999))
-                
-                        # Design FIR bandpass filter
-                        taps = fir_order   # from sidebar (should be odd)
-                        if taps % 2 == 0:
-                            taps += 1      # make it odd for type I filter (optional)
-                        try:
-                            b = signal.firwin(taps, [low, high], pass_zero='bandpass',
-                                              window=fir_window, fs=2.0)  # fs=2.0 because normalized to 1
-                        except Exception as e:
-                            st.error(f"FIR filter design failed: {e}. Using unfiltered data.")
-                            b = None
-                
-                        if b is not None:
-                            st.info(f"Applying {taps}-tap FIR bandpass filter ({freq_min}–{freq_max} MHz) with {fir_window} window.")
-                            filtered_array = np.zeros_like(original_array)
-                            n_samples, n_traces = original_array.shape
-                
-                            for i in range(n_traces):
-                                trace = original_array[:, i]
-                                if zero_phase:   # checkbox from sidebar
-                                    filtered = signal.filtfilt(b, 1.0, trace)
-                                else:
-                                    filtered = signal.lfilter(b, 1.0, trace)
-                                filtered_array[:, i] = filtered
-                
-                            original_array = filtered_array   # replace with filtered data
+                    
                     # Apply line reversal if requested
                     if reverse_line:
                         original_array = reverse_array(original_array)
@@ -2511,7 +2466,7 @@ if st.session_state.data_loaded:
                     ax2.scatter(pole_data['projected_distances'][i], pole_elev,
                                c=color, marker=marker, s=80, edgecolor='black', 
                                linewidth=1, alpha=0.8, zorder=5)
-                    ax2.text(pole_data['projected_distances'][i], pole_elev,
+                    ax2.text(pole_data['projected_distances'][i], pole_elev + 0.5,
                             pole_data['names'][i], fontsize=8, ha='center')
             
             ax2.set_xlabel('Distance along profile (m)')
@@ -3339,10 +3294,6 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
-
-
-
 
 
 
