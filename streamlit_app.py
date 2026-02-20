@@ -639,7 +639,7 @@ with st.sidebar:
                                   help="Apply filter forward and backward to eliminate phase shift")
         st.markdown('</div>', unsafe_allow_html=True)
         
-        process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
+    process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
 
 # Helper functions for deconvolution
 def estimate_wavelet(trace, method='auto', wavelet_length=51):
@@ -3339,6 +3339,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
