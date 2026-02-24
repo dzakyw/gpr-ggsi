@@ -2566,11 +2566,14 @@ if st.session_state.data_loaded:
                 Y_elev[:, i] = st.session_state.interpolated_coords['elevation'][i] - depth_axis
             
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
-            
+            if vmax_plot != vmin_plot:
+                normalized_array = 2 * (st.session_state.processed_array - vmin_plot) / (vmax_plot - vmin_plot) - 1
+            else:
+                normalized_array = st.session_state.processed_array - vmin_plot   # or np.zeros_like()
+
             # Use pcolormesh for elevation-adjusted display
             mesh = ax_elev.pcolormesh(X, Y_elev, st.session_state.processed_array,vmin=vmin_plot, vmax=vmax_plot,
                                      cmap='grey', shading='auto', alpha=0.9)
-            
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
             ax_elev.set_title('GPR Section')
@@ -3294,6 +3297,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
