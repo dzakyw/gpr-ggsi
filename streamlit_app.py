@@ -2809,7 +2809,106 @@ if st.session_state.data_loaded:
                 st.metric("Bandwidth (-3dB)", f"{bandwidth:.1f} MHz")
             with col4:
                 st.metric("Center Freq", f"{(low_freq + high_freq)/2:.1f} MHz")
+            # ----- Add this section after the FFT statistics -----
+        st.subheader("Export Trace Data")
     
+        # Get depth axis using scale_axes (same as in Gain Analysis, but correctly unpacked)
+        try:
+            n_samples = st.session_state.processed_array.shape[0]
+            # scale_axes returns: x_axis, y_axis, x_label, y_label, distance_unit, total_distance
+            x_axis_temp, y_axis_temp, x_label_temp, y_label_temp, _, _ = scale_axes(
+                (n_samples, 1),  # dummy shape for x-axis (we only need y-axis)
+                st.session_state.depth_unit,
+                st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+                "traces",  # x-axis unit not used
+                None,
+                coordinates=None
+            )
+            export_depth_axis = y_axis_temp
+            export_depth_label = y_label_temp
+        except Exception as e:
+            st.warning(f"Could not create depth axis: {e}. Using sample indices.")
+            export_depth_axis = np.arange(st.session_state.processed_array.shape[0])
+            export_depth_label = "Sample"
+    
+        # Determine which trace data to export based on the current FFT mode
+        export_trace_data = None
+        export_description = ""
+    
+        if fft_mode == "Single Trace":
+            trace_idx = trace_for_fft
+            if 0 <= trace_idx < st.session_state.processed_array.shape[1]:
+                export_trace_data = st.session_state.processed_array[:, trace_idx]
+                export_description = f"Trace_{trace_idx}"
+            else:
+                st.error("Invalid trace index.")
+    
+        elif fft_mode == "Average of All Traces":
+            export_trace_data = np.mean(st.session_state.processed_array, axis=1)
+            export_description = "Average_all_traces"
+    
+        elif fft_mode == "Trace Range":
+            if 'trace_start' in locals() and 'trace_end' in locals():
+                start = int(trace_start)
+                end = int(trace_end)
+                if 0 <= start <= end < st.session_state.processed_array.shape[1]:
+                    export_trace_data = np.mean(st.session_state.processed_array[:, start:end+1], axis=1)
+                    export_description = f"Average_traces_{start}_to_{end}"
+                else:
+                    st.error("Invalid trace range.")
+    
+        elif fft_mode == "Windowed Traces":
+            if st.session_state.use_custom_window:
+                # Get window indices (reuse the same logic as in the FFT calculation)
+                x_axis, y_axis, _, _, _, _ = scale_axes(
+                    st.session_state.processed_array.shape,
+                    st.session_state.depth_unit,
+                    st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+                    st.session_state.distance_unit,
+                    st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+                    coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+                )
+                window_info = get_window_indices(
+                    x_axis, y_axis,
+                    st.session_state.depth_min, st.session_state.depth_max,
+                    st.session_state.distance_min, st.session_state.distance_max
+                )
+                windowed_traces = st.session_state.processed_array[
+                    :, window_info['dist_min_idx']:window_info['dist_max_idx']
+                ]
+                export_trace_data = np.mean(windowed_traces, axis=1)
+                export_description = f"Average_windowed_traces"
+            else:
+                st.warning("Enable 'Use Custom Plot Window' to export windowed traces.")
+                export_trace_data = None
+    
+        else:
+            st.warning("Select a valid FFT mode to export trace data.")
+            export_trace_data = None
+    
+        # If we have valid data, create a DataFrame and offer download
+        if export_trace_data is not None:
+            # Ensure depth axis and trace data have the same length
+            if len(export_depth_axis) != len(export_trace_data):
+                min_len = min(len(export_depth_axis), len(export_trace_data))
+                export_depth_axis = export_depth_axis[:min_len]
+                export_trace_data = export_trace_data[:min_len]
+    
+            df_export = pd.DataFrame({
+                export_depth_label: export_depth_axis,
+                'Amplitude': export_trace_data
+            })
+    
+            csv_export = df_export.to_csv(index=False)
+    
+            st.download_button(
+                label=f"📥 Download {export_description} as CSV",
+                data=csv_export,
+                file_name=f"gpr_{export_description}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        # ------------------------------------------------------
     with tabs[5]:  # Gain Analysis
         
         st.subheader("Gain Analysis")
@@ -3297,6 +3396,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
