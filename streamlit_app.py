@@ -3492,7 +3492,7 @@ if st.session_state.data_loaded:
         elif selected_attr == "Instantaneous Frequency":
             st.info("**Frequency drops** (shifts to red/warmer colors) often indicate zones of signal attenuation, possibly due to fluids or fractures [citation:4].")
         elif selected_attr == "Sweetness":
-            st.info("**High sweetness** (High Amp / Low Freq) can indicate "sweet spots" - potentially gas-charged sediments or high-porosity zones [citation:4].")
+            st.info("**High sweetness** (High Amp / Low Freq) can indicate sweet spots, potentially gas-charged sediments or high-porosity zones [citation:4].")
         elif selected_attr == "Variance":
             st.info("**High variance** indicates chaotic reflectors, useful for detecting fracture zones, edges of buried objects, or the tails of hyperbolas.")
         elif selected_attr == "Similarity":
@@ -3563,6 +3563,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
