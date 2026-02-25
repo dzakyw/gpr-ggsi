@@ -2652,10 +2652,6 @@ if st.session_state.data_loaded:
                                      cmap='seismic', shading='auto', alpha=0.9)
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
-            ymin, ymax = ax_elev.get_ylim()
-            ticks = np.arange(np.floor(ymin), np.ceil(ymax) + 1, 1)
-            ax_elev.set_yticks(ticks)
-            ax_elev.set_yticklabels([])
             ax_elev.set_title('GPR Section')
             ax_elev.grid(True, alpha=0.2)
             plt.colorbar(mesh, ax=ax_elev, label='Amplitude')
@@ -3648,6 +3644,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
