@@ -26,8 +26,8 @@ from readgssi import readgssi
 from scipy.signal import hilbert
 from scipy.ndimage import uniform_filter, variance
 from matplotlib.colors import PowerNorm, SymLogNorm
-import segyio
-
+import obspy
+from obspy.core import Stream, Trace
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -1516,25 +1516,23 @@ def compute_gpr_attributes(radar_data, sample_axis, trace_axis):
                 similarity[:, i] += np.abs(corr) / (2 * half_window)
     attributes['Similarity'] = similarity
     return attributes
-def export_gpr_to_segy(processed_array, coords, sample_interval_us=1.0, time_range_ns=None):
+def export_gpr_to_segy_obspy(processed_array, coords, sample_interval_us=1.0):
     """
-    Convert GPR data to SEG‑Y with coordinates, normalized to ±1.
+    Convert GPR data to SEG‑Y using ObsPy, normalized to ±1.
 
     Parameters
     ----------
     processed_array : np.ndarray, shape (n_samples, n_traces)
-        The radar data.
+        Radar data.
     coords : dict
-        Must contain 'easting', 'northing', 'elevation' arrays (length = n_traces).
+        Must contain 'easting', 'northing', 'elevation' arrays (length n_traces).
     sample_interval_us : float
-        Sampling interval in microseconds (for binary header, we store 1 µs and note true value in text).
-    time_range_ns : float, optional
-        Total time range in nanoseconds (used for textual header).
+        Sampling interval in microseconds (will be stored as integer microseconds).
 
     Returns
     -------
     bytes
-        The SEG‑Y file content as bytes (ready for download).
+        SEG‑Y file content as bytes.
     """
     n_samples, n_traces = processed_array.shape
 
@@ -1546,71 +1544,77 @@ def export_gpr_to_segy(processed_array, coords, sample_interval_us=1.0, time_ran
     else:
         normalized = processed_array  # all zeros
 
-    # Transpose to (n_traces, n_samples) as required by segyio
-    trace_data = normalized.T.astype(np.float32)
+    # ---- Create a Stream with one Trace per GPR trace ----
+    stream = Stream()
 
-    # ---- SEG‑Y specification ----
-    spec = segyio.spec()
-    spec.samples = list(range(n_samples))
-    spec.tracecount = n_traces
-    spec.format = 5                     # 5 = 32‑bit IEEE float
-    spec.sorting = 2                    # crossline sorting (dummy)
-    spec.ext_headers = 0
+    # Sampling rate in Hz (needed for ObsPy stats)
+    sampling_rate_hz = 1e6 / sample_interval_us  # convert µs to Hz
 
-    # Write to a temporary file
+    for i in range(n_traces):
+        trace_data = normalized[:, i].astype(np.float32)
+
+        # Create Trace object
+        trace = Trace(data=trace_data)
+
+        # Set basic stats
+        trace.stats.sampling_rate = sampling_rate_hz
+        trace.stats.npts = n_samples
+        trace.stats.delta = sample_interval_us / 1e6  # in seconds (for internal use)
+        trace.stats.calib = 1.0
+        trace.stats.station = f"TRACE_{i+1:04d}"
+        trace.stats.network = "GPR"
+        trace.stats.channel = "GPR"
+
+        # ---- Set SEG‑Y specific trace header fields ----
+        # Access the trace header via trace.stats.segy.trace_header
+        # (ObsPy automatically creates a structured numpy array for the header)
+        trace.stats.segy = {}
+
+        # Required fields (dummy values)
+        trace.stats.segy.trace_sequence_number_line = i + 1
+        trace.stats.segy.trace_sequence_number_file = i + 1
+        trace.stats.segy.field_record = 1
+        trace.stats.segy.trace_number = i + 1
+        trace.stats.segy.energy_source_point = i + 1
+        trace.stats.segy.cdp = i + 1
+        trace.stats.segy.cdp_trace = 1
+        trace.stats.segy.trace_identification_code = 1  # seismic data
+        trace.stats.segy.num_summed_traces = 1
+        trace.stats.segy.num_stacked_traces = 1
+        trace.stats.segy.data_use = 1  # production
+
+        # Coordinates – store as integers in millimeters, with scalar -1000
+        scalar = -1000
+        trace.stats.segy.source_coordinate_scalar = scalar
+        trace.stats.segy.group_coordinate_scalar = scalar
+
+        # Source X/Y (bytes 73-80)
+        trace.stats.segy.source_x = int(coords['easting'][i] * 1000)
+        trace.stats.segy.source_y = int(coords['northing'][i] * 1000)
+
+        # Receiver group elevation (bytes 41-44)
+        trace.stats.segy.receiver_group_elevation = int(coords['elevation'][i] * 1000)
+
+        # Add any other optional headers you want
+        trace.stats.segy.delay_recording_time = 0  # milliseconds
+        trace.stats.segy.sample_interval_in_ms = int(sample_interval_us * 1000)  # microseconds per sample
+        trace.stats.segy.samples_per_data_trace = n_samples
+
+        stream.append(trace)
+
+    # ---- Write to SEG‑Y file in memory ----
     with tempfile.NamedTemporaryFile(suffix='.sgy', delete=False) as tmp:
         tmp_filename = tmp.name
 
     try:
-        with segyio.create(tmp_filename, spec) as dst:
-            # ----- Textual Header (first 3200 bytes) -----
-            true_interval_ns = time_range_ns / n_samples if time_range_ns else sample_interval_us * 1000
-            text_header = (
-                f"GPR data converted from DZT. "
-                f"True sample interval: {sample_interval_us:.6f} µs ({true_interval_ns:.3f} ns). "
-                f"Coordinates: Easting/Northing in SourceX/SourceY, Elevation in ReceiverGroupElevation (scalar -1000)."
-            )
-            # Pad to exactly 3200 characters (SEG‑Y requirement)
-            text_header = text_header.ljust(3200)[:3200]
-            dst.text[0] = text_header
+        # ObsPy's write function automatically creates a valid SEG‑Y file
+        stream.write(tmp_filename, format='SEGY', data_encoding=1)  # 1 = IBM float (most compatible)
+        # If you prefer IEEE float, use data_encoding=5 (but some software may not read it)
+        # stream.write(tmp_filename, format='SEGY', data_encoding=5)
 
-            # ----- Binary Header (optional but good) -----
-            # Use correct field names from segyio.BinField
-            dst.bin.update({
-                segyio.BinField.TraceSorting: 2,           # 2 = crossline sorting (placeholder)
-                segyio.BinField.SampleInterval: 1,          # stored as 1 µs (true value in text header)
-                segyio.BinField.Samples: n_samples,         # number of samples per trace
-            })
-
-            # ----- Trace Headers with Coordinates -----
-            scalar = -1000  # store coordinates as mm (divide by 1000)
-            for i in range(n_traces):
-                dst.header[i].update({
-                    segyio.TraceField.TRACE_SEQUENCE_LINE: i + 1,
-                    segyio.TraceField.TRACE_SEQUENCE_FILE: i + 1,
-                    segyio.TraceField.FieldRecord: 1,
-                    segyio.TraceField.TraceNumber: i + 1,
-                    segyio.TraceField.CDP: i + 1,
-                    segyio.TraceField.TraceIdentificationCode: 1,
-                    segyio.TraceField.NSummedTraces: 1,
-                    segyio.TraceField.NStackedTraces: 1,
-                    # Coordinates
-                    segyio.TraceField.SourceX: int(coords['easting'][i] * 1000),
-                    segyio.TraceField.SourceY: int(coords['northing'][i] * 1000),
-                    segyio.TraceField.ReceiverGroupElevation: int(coords['elevation'][i] * 1000),
-                    # Scalars
-                    segyio.TraceField.SourceCoordinateScalar: scalar,
-                    segyio.TraceField.GroupCoordinateScalar: scalar,
-                })
-
-            # ----- Trace Data -----
-            dst.trace = trace_data
-
-        # Read the file into bytes
         with open(tmp_filename, 'rb') as f:
             segy_bytes = f.read()
     finally:
-        # Clean up temporary file
         if os.path.exists(tmp_filename):
             os.unlink(tmp_filename)
 
@@ -2831,36 +2835,34 @@ if st.session_state.data_loaded:
             st.markdown("---")
             st.subheader("📥 Export to SEG‑Y")
             
-            # Try to extract true sampling interval from header
+            # Try to get sampling interval from header (as before)
             default_interval = 1.0
-            time_range_ns = None
             if st.session_state.header:
                 n_samples = st.session_state.header.get('spt', 1024)
-                # The header may store time range under different keys; adjust as needed.
-                time_range_ns = st.session_state.header.get('time_range_ns') or \
-                                st.session_state.header.get('time_range')
+                time_range_ns = st.session_state.header.get('time_range_ns', None)
+                if time_range_ns is None:
+                    time_range_ns = st.session_state.header.get('time_range', 662.5)
                 if time_range_ns:
                     interval_ns = time_range_ns / n_samples
-                    default_interval = interval_ns / 1000.0  # convert to µs
+                    default_interval = interval_ns / 1000.0  # µs
             
             sample_interval = st.number_input(
                 "Sampling interval (µs)",
                 min_value=0.0001, max_value=100.0, value=default_interval,
                 format="%.6f",
-                help="Sampling interval in microseconds. The binary header will store 1 µs; the true value is recorded in the textual header."
+                help="Sampling interval in microseconds. For your data: ~0.000647 µs."
             )
             
             if st.button("💾 Generate SEG‑Y file (normalized ±1)"):
                 if st.session_state.interpolated_coords is None:
                     st.error("No coordinates available. Please import a coordinate CSV first.")
                 else:
-                    with st.spinner("Creating SEG‑Y file..."):
+                    with st.spinner("Creating SEG‑Y file with ObsPy..."):
                         try:
-                            segy_bytes = export_gpr_to_segy(
+                            segy_bytes = export_gpr_to_segy_obspy(
                                 st.session_state.processed_array,
                                 st.session_state.interpolated_coords,
-                                sample_interval_us=sample_interval,
-                                time_range_ns=time_range_ns
+                                sample_interval_us=sample_interval
                             )
                             st.success("SEG‑Y file ready!")
                             st.download_button(
@@ -2871,6 +2873,7 @@ if st.session_state.data_loaded:
                             )
                         except Exception as e:
                             st.error(f"SEG‑Y export failed: {e}")
+
     
     with tabs[4]:  # FFT Analysis
         st.subheader("Frequency vs Amplitude Analysis (FFT)")
@@ -3766,6 +3769,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
