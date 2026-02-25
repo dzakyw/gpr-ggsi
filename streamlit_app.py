@@ -25,6 +25,7 @@ from matplotlib.patches import Patch
 from readgssi import readgssi
 from scipy.signal import hilbert
 from scipy.ndimage import uniform_filter, variance
+from matplotlib.colors import PowerNorm, SymLogNorm
 
 warnings.filterwarnings('ignore')
 
@@ -3223,97 +3224,175 @@ if st.session_state.data_loaded:
                     st.metric("Std Dev Residual", f"{np.std(flat_residual):.3e}")
                     st.metric("Residual Kurtosis", f"{np.mean((flat_residual - np.mean(flat_residual))**4) / (np.std(flat_residual)**4 + 1e-10):.2f}")
     
-    with tabs[7]:  # Adjust index based on your number of tabs
-        st.subheader("GPR Attribute Analysis for Hyperbolas & Layers")
-
-        # Get the correct axes (same as in your other plots)
-        x_axis_attr, y_axis_attr, x_label_attr, y_label_attr, _, _ = scale_axes(
-            st.session_state.processed_array.shape,
-            st.session_state.depth_unit,
-            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-            st.session_state.distance_unit,
-            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
-            coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
-        )
-
-        # Compute attributes (maybe with a spinner for large data)
+    # =============================================================================
+    # GPR Attribute Analysis Tab (tabs[8])
+    # =============================================================================
+    with tabs[7]:  # Adjust index if your tabs are ordered differently
+        st.subheader("📊 GPR Attribute Analysis for Hyperbolas & Layers")
+    
+        # --- Get properly scaled axes using your existing helper ---
+        try:
+            x_axis_attr, y_axis_attr, x_label_attr, y_label_attr, _, _ = scale_axes(
+                st.session_state.processed_array.shape,
+                st.session_state.depth_unit,
+                st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+                st.session_state.distance_unit,
+                st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+                coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+            )
+        except Exception as e:
+            st.error(f"Error scaling axes: {e}")
+            st.stop()
+    
+        # --- Compute attributes (show spinner for large data) ---
         with st.spinner("Computing GPR attributes..."):
             gpr_attributes = compute_gpr_attributes(
                 st.session_state.processed_array,
                 y_axis_attr,
                 x_axis_attr
             )
-
-        # Let user select which attribute to view
+    
+        # --- Select attribute to display ---
         selected_attr = st.selectbox(
             "Select Attribute to Visualize",
             list(gpr_attributes.keys())
         )
-
-        # Display options
+        attr_data = gpr_attributes[selected_attr]
+    
+        # --- Basic display options (colormap, colorbar) ---
         col1, col2, col3 = st.columns(3)
         with col1:
-            attr_cmap = st.selectbox("Colormap", ["viridis", "grey", "RdBu", "jet", "plasma"], key="attr_cmap")
+            attr_cmap = st.selectbox(
+                "Colormap",
+                ["viridis", "grey", "RdBu", "jet", "plasma", "seismic", "coolwarm"],
+                key="attr_cmap"
+            )
         with col2:
             show_colorbar = st.checkbox("Show Colorbar", True, key="attr_cbar")
         with col3:
-            clip_percent = st.slider("Clip Percentile", 0.1, 5.0, 1.0, 0.1, 
-                                      help="Clip extreme values for better visualization") / 100.0
-
-        # Get the selected attribute data
-        attr_data = gpr_attributes[selected_attr]
-
-        # Clip for better visualization
-        vmin = np.percentile(attr_data, clip_percent * 100)
-        vmax = np.percentile(attr_data, 100 - clip_percent * 100)
-
-        # Plot the attribute
+            # Optional: reverse colormap for intuitive polarity
+            reverse_cmap = st.checkbox("Reverse colormap", False)
+    
+        if reverse_cmap:
+            attr_cmap = attr_cmap + "_r"
+    
+        # ================= ADVANCED COLOR SCALING =================
+        with st.expander("🎚️ Advanced Color Scaling", expanded=False):
+            scaling_method = st.radio(
+                "Scaling Method",
+                ["Percentile", "Manual", "Standard Deviation", "Normalization"],
+                horizontal=True
+            )
+    
+            norm = None  # will hold a matplotlib norm if used
+    
+            if scaling_method == "Percentile":
+                col1, col2 = st.columns(2)
+                with col1:
+                    low_pct = st.slider("Low percentile", 0.0, 50.0, 1.0, 0.1) / 100.0
+                with col2:
+                    high_pct = st.slider("High percentile", 50.0, 100.0, 99.0, 0.1) / 100.0
+                vmin = np.percentile(attr_data, low_pct * 100)
+                vmax = np.percentile(attr_data, high_pct * 100)
+    
+            elif scaling_method == "Manual":
+                col1, col2 = st.columns(2)
+                with col1:
+                    vmin = st.number_input("vmin", value=float(np.min(attr_data)), format="%.4f")
+                with col2:
+                    vmax = st.number_input("vmax", value=float(np.max(attr_data)), format="%.4f")
+    
+            elif scaling_method == "Standard Deviation":
+                n_std = st.slider("Number of standard deviations", 0.5, 5.0, 2.0, 0.1)
+                mean_val = np.mean(attr_data)
+                std_val = np.std(attr_data)
+                vmin = mean_val - n_std * std_val
+                vmax = mean_val + n_std * std_val
+    
+            else:  # Normalization
+                # For normalization we still need vmin/vmax (from percentiles)
+                low_pct_norm = st.slider("Percentile range for clipping", 0.0, 5.0, 1.0, 0.1) / 100.0
+                vmin = np.percentile(attr_data, low_pct_norm * 100)
+                vmax = np.percentile(attr_data, 100 - low_pct_norm * 100)
+    
+                norm_type = st.selectbox("Norm type", ["Power", "Symmetric Log"])
+                if norm_type == "Power":
+                    gamma = st.slider("Gamma", 0.1, 3.0, 0.5, 0.1)
+                    norm = PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
+                else:  # Symmetric Log
+                    # choose a sensible linear threshold
+                    default_linthresh = 0.1 * (vmax - vmin) if (vmax - vmin) != 0 else 1.0
+                    linthresh = st.number_input(
+                        "Linear threshold",
+                        value=default_linthresh,
+                        format="%.4f"
+                    )
+                    norm = SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
+    
+        # ========== LOCAL CONTRAST ENHANCEMENT (CLAHE) ==========
+        apply_clahe = st.checkbox("Apply local contrast enhancement (CLAHE) – helps see fine texture")
+        if apply_clahe:
+            try:
+                from skimage import exposure
+                # Adjust clip_limit and kernel_size for best results
+                clip_limit = st.slider("CLAHE clip limit", 0.01, 0.1, 0.03, 0.01)
+                kernel_size = st.slider("CLAHE kernel size (pixels)", 3, 51, 15, 2, step=2)
+                attr_data_display = exposure.equalize_adapthist(
+                    attr_data,
+                    clip_limit=clip_limit,
+                    kernel_size=(kernel_size, kernel_size)
+                )
+                st.info("CLAHE applied – displayed image is contrast‑enhanced; data values unchanged.")
+            except ImportError:
+                st.error("scikit-image not installed. Run `pip install scikit-image` to use CLAHE.")
+                attr_data_display = attr_data
+        else:
+            attr_data_display = attr_data
+    
+        # ==================== PLOTTING ====================
         fig_attr, ax_attr = plt.subplots(figsize=(12, 8))
-        
-        # Use extent for proper axis scaling
         extent = [x_axis_attr[0], x_axis_attr[-1], y_axis_attr[-1], y_axis_attr[0]]
-        
-        im = ax_attr.imshow(attr_data, extent=extent, aspect='auto', 
-                           cmap=attr_cmap, vmin=vmin, vmax=vmax)
-        
+    
+        if norm is not None:
+            im = ax_attr.imshow(attr_data_display, extent=extent, aspect='auto',
+                                cmap=attr_cmap, norm=norm)
+        else:
+            im = ax_attr.imshow(attr_data_display, extent=extent, aspect='auto',
+                                cmap=attr_cmap, vmin=vmin, vmax=vmax)
+    
         ax_attr.set_xlabel(x_label_attr)
         ax_attr.set_ylabel(y_label_attr)
-        ax_attr.set_title(f"{selected_attr} Attribute Analysis")
+        ax_attr.set_title(f"{selected_attr} – {scaling_method} scaling")
         ax_attr.grid(True, alpha=0.2, linestyle='--')
-        
+    
         if show_colorbar:
             cbar = plt.colorbar(im, ax=ax_attr)
             cbar.set_label(selected_attr)
-
+    
         st.pyplot(fig_attr)
-
-        # Add interpretation guide based on selected attribute
+    
+        # ========== INTERPRETATION GUIDE ==========
         st.markdown("#### 🧠 Interpretation Guide")
-        if selected_attr == "Instantaneous Amplitude":
-            st.info("**High values** (bright spots) indicate significant impedance contrasts: layer boundaries, pipe tops, or voids. The apex of hyperbolas will show peak amplitude.")
-        elif selected_attr == "Instantaneous Phase":
-            st.info("**Continuous phase events** highlight reflector geometry regardless of amplitude. Excellent for tracing layer boundaries and identifying the symmetry axis of hyperbolas.")
-        elif selected_attr == "Cosine of Phase":
-            st.info("**Enhances reflector continuity** while suppressing amplitude effects. The bottom of reinforced layers can be interpreted through this attribute [citation:2].")
-        elif selected_attr == "Instantaneous Frequency":
-            st.info("**Frequency drops** (shifts to red/warmer colors) often indicate zones of signal attenuation, possibly due to fluids or fractures [citation:4].")
-        elif selected_attr == "Sweetness":
-            st.info("**High sweetness** (High Amp / Low Freq) can indicate sweet spots, potentially gas-charged sediments or high-porosity zones [citation:4].")
-        elif selected_attr == "Variance":
-            st.info("**High variance** indicates chaotic reflectors, useful for detecting fracture zones, edges of buried objects, or the tails of hyperbolas.")
-        elif selected_attr == "Similarity":
-            st.info("**Low similarity** (dark colors) indicates discontinuities - faults, object edges, or areas where the signal is disturbed by a buried target.")
-        else:
-            st.info("Refer to GPR literature for detailed interpretation of this attribute.")
-
-        # Add option to export attribute data
+        guides = {
+            "Instantaneous Amplitude": "**High values** (bright spots) indicate significant impedance contrasts: layer boundaries, pipe tops, or voids. The apex of hyperbolas shows peak amplitude.",
+            "Instantaneous Phase": "**Continuous phase events** highlight reflector geometry regardless of amplitude. Excellent for tracing layer boundaries and identifying the symmetry axis of hyperbolas.",
+            "Cosine of Phase": "**Enhances reflector continuity** while suppressing amplitude effects. The bottom of reinforced layers can be interpreted through this attribute.",
+            "Instantaneous Frequency": "**Frequency drops** (shifts to red/warmer colors) often indicate zones of signal attenuation, possibly due to fluids or fractures.",
+            "Sweetness": "**High sweetness** (High Amp / Low Freq) can indicate 'sweet spots' – potentially gas‑charged sediments or high‑porosity zones.",
+            "Variance": "**High variance** indicates chaotic reflectors, useful for detecting fracture zones, edges of buried objects, or the tails of hyperbolas.",
+            "Similarity": "**Low similarity** (dark colors) indicates discontinuities – faults, object edges, or areas where the signal is disturbed by a buried target."
+        }
+        guide_msg = guides.get(selected_attr, "Refer to GPR literature for detailed interpretation of this attribute.")
+        st.info(guide_msg)
+    
+        # ========== EXPORT CURRENT ATTRIBUTE ==========
         if st.button("📥 Export Current Attribute as CSV"):
-            attr_df = pd.DataFrame(attr_data, 
-                                  columns=[f"{xi:.2f}" for xi in x_axis_attr])
-            attr_csv = attr_df.to_csv(index=False)
+            # Use the scaled x-axis as column headers
+            attr_df = pd.DataFrame(attr_data, columns=[f"{xi:.2f}" for xi in x_axis_attr])
+            csv_attr = attr_df.to_csv(index=False)
             st.download_button(
                 label="Download CSV",
-                data=attr_csv,
+                data=csv_attr,
                 file_name=f"gpr_{selected_attr.replace(' ', '_')}.csv",
                 mime="text/csv"
             )
@@ -3565,6 +3644,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
