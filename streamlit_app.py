@@ -26,6 +26,7 @@ from readgssi import readgssi
 from scipy.signal import hilbert
 from scipy.ndimage import uniform_filter, variance
 from matplotlib.colors import PowerNorm, SymLogNorm
+import segyio
 
 warnings.filterwarnings('ignore')
 
@@ -1515,6 +1516,91 @@ def compute_gpr_attributes(radar_data, sample_axis, trace_axis):
                 similarity[:, i] += np.abs(corr) / (2 * half_window)
     attributes['Similarity'] = similarity
     return attributes
+def export_gpr_to_segy(processed_array, coords, sample_interval_us=1.0):
+    """
+    Convert GPR data to SEG‑Y with coordinates, normalized to ±1.
+
+    Parameters
+    ----------
+    processed_array : np.ndarray, shape (n_samples, n_traces)
+        The radar data.
+    coords : dict
+        Must contain 'easting', 'northing', 'elevation' arrays (length = n_traces).
+    sample_interval_us : float
+        Sampling interval in microseconds (default 1 µs).
+
+    Returns
+    -------
+    bytes
+        The SEG‑Y file content as bytes (ready for download).
+    """
+    n_samples, n_traces = processed_array.shape
+
+    # ---- Normalize globally to [-1, 1] ----
+    data_min = np.min(processed_array)
+    data_max = np.max(processed_array)
+    if data_max - data_min != 0:
+        normalized = 2 * (processed_array - data_min) / (data_max - data_min) - 1
+    else:
+        normalized = processed_array  # all zeros
+
+    # Transpose to (n_traces, n_samples) as required by segyio
+    trace_data = normalized.T.astype(np.float32)
+
+    # ---- SEG‑Y specification ----
+    spec = segyio.spec()
+    spec.samples = list(range(n_samples))
+    spec.tracecount = n_traces
+    spec.format = 5                     # 5 = 32‑bit IEEE float
+    spec.sorting = 2                     # crossline sorting (dummy)
+    spec.ext_headers = 0
+
+    # Write to a temporary file
+    with tempfile.NamedTemporaryFile(suffix='.sgy', delete=False) as tmp:
+        tmp_filename = tmp.name
+
+    try:
+        with segyio.create(tmp_filename, spec) as dst:
+            # Binary header (optional but good)
+            dst.bin.update({
+                segyio.BinField.TRACE_SORTING_CODE: 2,      # crossline
+                segyio.BinField.SAMPLE_INTERVAL: int(sample_interval_us),
+                segyio.BinField.SAMPLES_PER_DATA_TRACE: n_samples,
+            })
+
+            # Fill trace headers with coordinates
+            scalar = -1000  # store coordinates as mm (divide by 1000)
+            for i in range(n_traces):
+                dst.header[i].update({
+                    segyio.TraceField.TRACE_SEQUENCE_LINE: i + 1,
+                    segyio.TraceField.TRACE_SEQUENCE_FILE: i + 1,
+                    segyio.TraceField.FieldRecord: 1,
+                    segyio.TraceField.TraceNumber: i + 1,
+                    segyio.TraceField.CDP: i + 1,
+                    segyio.TraceField.TraceIdentificationCode: 1,
+                    segyio.TraceField.NSummedTraces: 1,
+                    segyio.TraceField.NStackedTraces: 1,
+                    # Coordinates
+                    segyio.TraceField.SourceX: int(coords['easting'][i] * 1000),
+                    segyio.TraceField.SourceY: int(coords['northing'][i] * 1000),
+                    segyio.TraceField.ReceiverGroupElevation: int(coords['elevation'][i] * 1000),
+                    # Scalars
+                    segyio.TraceField.SourceCoordinateScalar: scalar,
+                    segyio.TraceField.GroupCoordinateScalar: scalar,
+                })
+
+            # Write trace data
+            dst.trace = trace_data
+
+        # Read the file into bytes
+        with open(tmp_filename, 'rb') as f:
+            segy_bytes = f.read()
+    finally:
+        # Clean up temporary file
+        if os.path.exists(tmp_filename):
+            os.unlink(tmp_filename)
+
+    return segy_bytes
 # Main content
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
@@ -2728,7 +2814,37 @@ if st.session_state.data_loaded:
                             for name in pole_data['names']]
                 })
                 st.dataframe(pole_info_df.sort_values('Distance along profile (m)'))
+            st.markdown("---")
+            st.subheader("📥 Export to SEG‑Y")
             
+            # Ask for sampling interval (can be read from header if available)
+            default_interval = 1.0  # microseconds, adjust as needed
+            sample_interval = st.number_input(
+                "Sampling interval (µs)",
+                min_value=0.01, max_value=4000, value=default_interval,
+                help="Set the correct sampling interval of your GPR data (usually from the DZT header)."
+            )
+            
+            if st.button("💾 Generate SEG‑Y file (normalized ±1)"):
+                if st.session_state.interpolated_coords is None:
+                    st.error("No coordinates available. Please import a coordinate CSV first.")
+                else:
+                    with st.spinner("Creating SEG‑Y file..."):
+                        try:
+                            segy_bytes = export_gpr_to_segy(
+                                st.session_state.processed_array,
+                                st.session_state.interpolated_coords,
+                                sample_interval_us=sample_interval
+                            )
+                            st.success("SEG‑Y file ready!")
+                            st.download_button(
+                                label="📥 Download SEG‑Y file",
+                                data=segy_bytes,
+                                file_name="gpr_data.sgy",
+                                mime="application/octet-stream"
+                            )
+                        except Exception as e:
+                            st.error(f"SEG‑Y export failed: {e}")
             # Export coordinates
             st.subheader("Export Interpolated Coordinates")
             
@@ -3644,6 +3760,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
