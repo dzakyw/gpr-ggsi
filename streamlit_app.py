@@ -2821,7 +2821,7 @@ if st.session_state.data_loaded:
             default_interval = 1.0  # microseconds, adjust as needed
             sample_interval = st.number_input(
                 "Sampling interval (µs)",
-                min_value=0.01, max_value=4000.0, value=default_interval,
+                min_value=0.0000001, max_value=100.0, value=default_interval,
                 help="Set the correct sampling interval of your GPR data (usually from the DZT header)."
             )
             
@@ -3760,6 +3760,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
