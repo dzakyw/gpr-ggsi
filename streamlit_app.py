@@ -23,6 +23,9 @@ from scipy.optimize import minimize
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 from readgssi import readgssi
+from scipy.signal import hilbert
+from scipy.ndimage import uniform_filter, variance
+
 warnings.filterwarnings('ignore')
 
 # Set page config
@@ -1438,7 +1441,77 @@ def get_window_indices(x_axis, y_axis, depth_min, depth_max, distance_min, dista
         'dist_min_val': x_axis[dist_idx_min],
         'dist_max_val': x_axis[dist_idx_max]
     }
+def compute_gpr_attributes(radar_data, sample_axis, trace_axis):
+    """
+    Compute a suite of GPR attributes from the processed radar data.
 
+    Parameters:
+    - radar_data: 2D numpy array (samples x traces)
+    - sample_axis: 1D array for the depth/time axis
+    - trace_axis: 1D array for the distance/trace axis
+
+    Returns:
+    - attributes: Dictionary containing all computed attribute arrays
+    """
+    attributes = {}
+    n_samples, n_traces = radar_data.shape
+
+    # 1. Instantaneous Amplitude (Reflection Strength)
+    #    Uses Hilbert transform to get the envelope
+    analytic_signal = hilbert(radar_data, axis=0)
+    instantaneous_amplitude = np.abs(analytic_signal)
+    attributes['Instantaneous Amplitude'] = instantaneous_amplitude
+
+    # 2. Instantaneous Phase
+    #    The phase angle of the analytic signal
+    instantaneous_phase = np.angle(analytic_signal)
+    attributes['Instantaneous Phase'] = instantaneous_phase
+
+    # 3. Cosine of Instantaneous Phase (PIACIP-like)
+    #    Enhances reflector continuity [citation:2]
+    cos_phase = np.cos(instantaneous_phase)
+    attributes['Cosine of Phase'] = cos_phase
+
+    # 4. Instantaneous Frequency
+    #    Derivative of the instantaneous phase
+    instantaneous_frequency = np.diff(instantaneous_phase, axis=0, prepend=0)
+    # Simple scaling to avoid extreme values, can be refined
+    attributes['Instantaneous Frequency'] = instantaneous_frequency
+
+    # 5. RMS Amplitude
+    #    Calculated over a vertical window
+    window_size = max(5, n_samples // 50)  # Adaptive window size
+    rms_amplitude = np.sqrt(uniform_filter(radar_data**2, size=[window_size, 1], mode='constant'))
+    attributes['RMS Amplitude'] = rms_amplitude
+
+    # 6. Sweetness (Instantaneous Amplitude / Instantaneous Frequency)
+    #    Helps identify "sweet spots" or bright layers [citation:4]
+    #    Avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        sweetness = np.divide(instantaneous_amplitude, 
+                              np.abs(instantaneous_frequency) + 1e-10)
+        sweetness = np.nan_to_num(sweetness)
+    attributes['Sweetness'] = sweetness
+
+    # 7. Variance Attribute (Texture)
+    #    High variance can indicate chaotic reflectors or hyperbola tails
+    variance_attr = variance(radar_data, size=[5, 5], mode='constant')
+    attributes['Variance'] = variance_attr
+
+    # 8. Similarity Attribute (Coherence)
+    #    Measures trace-to-trace similarity (simple implementation)
+    similarity = np.zeros_like(radar_data)
+    half_window = 2
+    for i in range(half_window, n_traces - half_window):
+        # Cross-correlation between trace i and its neighbors
+        trace_i = radar_data[:, i]
+        for j in range(i - half_window, i + half_window + 1):
+            if j != i:
+                trace_j = radar_data[:, j]
+                corr = np.corrcoef(trace_i, trace_j)[0, 1]
+                similarity[:, i] += np.abs(corr) / (2 * half_window)
+    attributes['Similarity'] = similarity
+    return attributes
 # Main content
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
@@ -3344,6 +3417,100 @@ if st.session_state.data_loaded:
                     mime="application/json",
                     use_container_width=True
                 )
+    with tabs[8]:  # Adjust index based on your number of tabs
+        st.subheader("GPR Attribute Analysis for Hyperbolas & Layers")
+
+        # Get the correct axes (same as in your other plots)
+        x_axis_attr, y_axis_attr, x_label_attr, y_label_attr, _, _ = scale_axes(
+            st.session_state.processed_array.shape,
+            st.session_state.depth_unit,
+            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+            st.session_state.distance_unit,
+            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+            coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+        )
+
+        # Compute attributes (maybe with a spinner for large data)
+        with st.spinner("Computing GPR attributes..."):
+            gpr_attributes = compute_gpr_attributes(
+                st.session_state.processed_array,
+                y_axis_attr,
+                x_axis_attr
+            )
+
+        # Let user select which attribute to view
+        selected_attr = st.selectbox(
+            "Select Attribute to Visualize",
+            list(gpr_attributes.keys())
+        )
+
+        # Display options
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            attr_cmap = st.selectbox("Colormap", ["viridis", "grey", "RdBu", "jet", "plasma"], key="attr_cmap")
+        with col2:
+            show_colorbar = st.checkbox("Show Colorbar", True, key="attr_cbar")
+        with col3:
+            clip_percent = st.slider("Clip Percentile", 0.1, 5.0, 1.0, 0.1, 
+                                      help="Clip extreme values for better visualization") / 100.0
+
+        # Get the selected attribute data
+        attr_data = gpr_attributes[selected_attr]
+
+        # Clip for better visualization
+        vmin = np.percentile(attr_data, clip_percent * 100)
+        vmax = np.percentile(attr_data, 100 - clip_percent * 100)
+
+        # Plot the attribute
+        fig_attr, ax_attr = plt.subplots(figsize=(12, 8))
+        
+        # Use extent for proper axis scaling
+        extent = [x_axis_attr[0], x_axis_attr[-1], y_axis_attr[-1], y_axis_attr[0]]
+        
+        im = ax_attr.imshow(attr_data, extent=extent, aspect='auto', 
+                           cmap=attr_cmap, vmin=vmin, vmax=vmax)
+        
+        ax_attr.set_xlabel(x_label_attr)
+        ax_attr.set_ylabel(y_label_attr)
+        ax_attr.set_title(f"{selected_attr} Attribute Analysis")
+        ax_attr.grid(True, alpha=0.2, linestyle='--')
+        
+        if show_colorbar:
+            cbar = plt.colorbar(im, ax=ax_attr)
+            cbar.set_label(selected_attr)
+
+        st.pyplot(fig_attr)
+
+        # Add interpretation guide based on selected attribute
+        st.markdown("#### 🧠 Interpretation Guide")
+        if selected_attr == "Instantaneous Amplitude":
+            st.info("**High values** (bright spots) indicate significant impedance contrasts: layer boundaries, pipe tops, or voids. The apex of hyperbolas will show peak amplitude.")
+        elif selected_attr == "Instantaneous Phase":
+            st.info("**Continuous phase events** highlight reflector geometry regardless of amplitude. Excellent for tracing layer boundaries and identifying the symmetry axis of hyperbolas.")
+        elif selected_attr == "Cosine of Phase":
+            st.info("**Enhances reflector continuity** while suppressing amplitude effects. The bottom of reinforced layers can be interpreted through this attribute [citation:2].")
+        elif selected_attr == "Instantaneous Frequency":
+            st.info("**Frequency drops** (shifts to red/warmer colors) often indicate zones of signal attenuation, possibly due to fluids or fractures [citation:4].")
+        elif selected_attr == "Sweetness":
+            st.info("**High sweetness** (High Amp / Low Freq) can indicate "sweet spots" - potentially gas-charged sediments or high-porosity zones [citation:4].")
+        elif selected_attr == "Variance":
+            st.info("**High variance** indicates chaotic reflectors, useful for detecting fracture zones, edges of buried objects, or the tails of hyperbolas.")
+        elif selected_attr == "Similarity":
+            st.info("**Low similarity** (dark colors) indicates discontinuities - faults, object edges, or areas where the signal is disturbed by a buried target.")
+        else:
+            st.info("Refer to GPR literature for detailed interpretation of this attribute.")
+
+        # Add option to export attribute data
+        if st.button("📥 Export Current Attribute as CSV"):
+            attr_df = pd.DataFrame(attr_data, 
+                                  columns=[f"{xi:.2f}" for xi in x_axis_attr])
+            attr_csv = attr_df.to_csv(index=False)
+            st.download_button(
+                label="Download CSV",
+                data=attr_csv,
+                file_name=f"gpr_{selected_attr.replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
 
 # Initial state message
 elif not dzt_file:
@@ -3396,6 +3563,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
