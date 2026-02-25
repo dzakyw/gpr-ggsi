@@ -2820,21 +2820,21 @@ if st.session_state.data_loaded:
             # Ask for sampling interval (can be read from header if available)
             default_interval = 1.0 # microseconds, adjust as needed
             if st.session_state.header:
-            n_samples = st.session_state.header.get('spt', 1024)
-            time_range_ns = st.session_state.header.get('time_range_ns', None)
-            if time_range_ns is None:
-                # maybe the header uses 'time_range' or 'timewindow'
-                time_range_ns = st.session_state.header.get('time_range', 662.5)
-            if time_range_ns:
-                interval_ns = time_range_ns / n_samples
-                default_interval = interval_ns / 1000.0  # convert to µs
-        
-        sample_interval = st.number_input(
-            "Sampling interval (µs)",
-            min_value=0.0001, max_value=100.0, value=default_interval,
-            format="%.6f",
-            help="Sampling interval in microseconds. For your data: ~0.000647 µs."
-        )
+                n_samples = st.session_state.header.get('spt', 1024)
+                time_range_ns = st.session_state.header.get('time_range_ns', None)
+                if time_range_ns is None:
+                    # maybe the header uses 'time_range' or 'timewindow'
+                    time_range_ns = st.session_state.header.get('time_range', 662.5)
+                if time_range_ns:
+                    interval_ns = time_range_ns / n_samples
+                    default_interval = interval_ns / 1000.0  # convert to µs
+            
+            sample_interval = st.number_input(
+                "Sampling interval (µs)",
+                min_value=0.0001, max_value=100.0, value=default_interval,
+                format="%.6f",
+                help="Sampling interval in microseconds. For your data: ~0.000647 µs."
+            )
             
             if st.button("💾 Generate SEG‑Y file (normalized ±1)"):
                 if st.session_state.interpolated_coords is None:
@@ -3771,6 +3771,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
