@@ -2818,10 +2818,10 @@ if st.session_state.data_loaded:
             st.subheader("📥 Export to SEG‑Y")
             
             # Ask for sampling interval (can be read from header if available)
-            default_interval = 0.000647   # microseconds, adjust as needed
+            default_interval = 1 # microseconds, adjust as needed
             sample_interval = st.number_input(
                 "Sampling interval (µs)",
-                min_value=0.0000001, max_value=100.0, value=default_interval,
+                min_value=0.0000001, max_value=100.0, value=0.00000001,
                 help="Set the correct sampling interval of your GPR data (usually from the DZT header)."
             )
             
@@ -3760,6 +3760,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
