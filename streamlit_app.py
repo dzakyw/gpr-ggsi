@@ -1892,7 +1892,7 @@ if dzt_file and process_btn:
 if st.session_state.data_loaded:
     # Create tabs - Added Deconvolution Analysis tab
     tab_names = ["📊 Header Info", "📈 Full View", "🔍 Custom Window", "🗺️ Coordinate View", 
-                 "📉 FFT Analysis", "🎛️ Gain Analysis", "🔬 Deconvolution Analysis", "💾 Export","📊 Attribute Analysis"]
+                 "📉 FFT Analysis", "🎛️ Gain Analysis", "🔬 Deconvolution Analysis", "📊 Attribute Analysis","💾 Export"]
     tabs = st.tabs(tab_names)
     
     with tabs[0]:  # Header Info
@@ -3221,7 +3221,101 @@ if st.session_state.data_loaded:
                     st.metric("Std Dev Residual", f"{np.std(flat_residual):.3e}")
                     st.metric("Residual Kurtosis", f"{np.mean((flat_residual - np.mean(flat_residual))**4) / (np.std(flat_residual)**4 + 1e-10):.2f}")
     
-    with tabs[7]:  # Export
+    with tabs[7]:  # Adjust index based on your number of tabs
+        st.subheader("GPR Attribute Analysis for Hyperbolas & Layers")
+
+        # Get the correct axes (same as in your other plots)
+        x_axis_attr, y_axis_attr, x_label_attr, y_label_attr, _, _ = scale_axes(
+            st.session_state.processed_array.shape,
+            st.session_state.depth_unit,
+            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+            st.session_state.distance_unit,
+            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+            coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+        )
+
+        # Compute attributes (maybe with a spinner for large data)
+        with st.spinner("Computing GPR attributes..."):
+            gpr_attributes = compute_gpr_attributes(
+                st.session_state.processed_array,
+                y_axis_attr,
+                x_axis_attr
+            )
+
+        # Let user select which attribute to view
+        selected_attr = st.selectbox(
+            "Select Attribute to Visualize",
+            list(gpr_attributes.keys())
+        )
+
+        # Display options
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            attr_cmap = st.selectbox("Colormap", ["viridis", "grey", "RdBu", "jet", "plasma"], key="attr_cmap")
+        with col2:
+            show_colorbar = st.checkbox("Show Colorbar", True, key="attr_cbar")
+        with col3:
+            clip_percent = st.slider("Clip Percentile", 0.1, 5.0, 1.0, 0.1, 
+                                      help="Clip extreme values for better visualization") / 100.0
+
+        # Get the selected attribute data
+        attr_data = gpr_attributes[selected_attr]
+
+        # Clip for better visualization
+        vmin = np.percentile(attr_data, clip_percent * 100)
+        vmax = np.percentile(attr_data, 100 - clip_percent * 100)
+
+        # Plot the attribute
+        fig_attr, ax_attr = plt.subplots(figsize=(12, 8))
+        
+        # Use extent for proper axis scaling
+        extent = [x_axis_attr[0], x_axis_attr[-1], y_axis_attr[-1], y_axis_attr[0]]
+        
+        im = ax_attr.imshow(attr_data, extent=extent, aspect='auto', 
+                           cmap=attr_cmap, vmin=vmin, vmax=vmax)
+        
+        ax_attr.set_xlabel(x_label_attr)
+        ax_attr.set_ylabel(y_label_attr)
+        ax_attr.set_title(f"{selected_attr} Attribute Analysis")
+        ax_attr.grid(True, alpha=0.2, linestyle='--')
+        
+        if show_colorbar:
+            cbar = plt.colorbar(im, ax=ax_attr)
+            cbar.set_label(selected_attr)
+
+        st.pyplot(fig_attr)
+
+        # Add interpretation guide based on selected attribute
+        st.markdown("#### 🧠 Interpretation Guide")
+        if selected_attr == "Instantaneous Amplitude":
+            st.info("**High values** (bright spots) indicate significant impedance contrasts: layer boundaries, pipe tops, or voids. The apex of hyperbolas will show peak amplitude.")
+        elif selected_attr == "Instantaneous Phase":
+            st.info("**Continuous phase events** highlight reflector geometry regardless of amplitude. Excellent for tracing layer boundaries and identifying the symmetry axis of hyperbolas.")
+        elif selected_attr == "Cosine of Phase":
+            st.info("**Enhances reflector continuity** while suppressing amplitude effects. The bottom of reinforced layers can be interpreted through this attribute [citation:2].")
+        elif selected_attr == "Instantaneous Frequency":
+            st.info("**Frequency drops** (shifts to red/warmer colors) often indicate zones of signal attenuation, possibly due to fluids or fractures [citation:4].")
+        elif selected_attr == "Sweetness":
+            st.info("**High sweetness** (High Amp / Low Freq) can indicate sweet spots, potentially gas-charged sediments or high-porosity zones [citation:4].")
+        elif selected_attr == "Variance":
+            st.info("**High variance** indicates chaotic reflectors, useful for detecting fracture zones, edges of buried objects, or the tails of hyperbolas.")
+        elif selected_attr == "Similarity":
+            st.info("**Low similarity** (dark colors) indicates discontinuities - faults, object edges, or areas where the signal is disturbed by a buried target.")
+        else:
+            st.info("Refer to GPR literature for detailed interpretation of this attribute.")
+
+        # Add option to export attribute data
+        if st.button("📥 Export Current Attribute as CSV"):
+            attr_df = pd.DataFrame(attr_data, 
+                                  columns=[f"{xi:.2f}" for xi in x_axis_attr])
+            attr_csv = attr_df.to_csv(index=False)
+            st.download_button(
+                label="Download CSV",
+                data=attr_csv,
+                file_name=f"gpr_{selected_attr.replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
+    with tabs[8]:  # Export
         st.subheader("Export Processed Data")
         
         # Export options in columns
@@ -3417,100 +3511,6 @@ if st.session_state.data_loaded:
                     mime="application/json",
                     use_container_width=True
                 )
-    with tabs[8]:  # Adjust index based on your number of tabs
-        st.subheader("GPR Attribute Analysis for Hyperbolas & Layers")
-
-        # Get the correct axes (same as in your other plots)
-        x_axis_attr, y_axis_attr, x_label_attr, y_label_attr, _, _ = scale_axes(
-            st.session_state.processed_array.shape,
-            st.session_state.depth_unit,
-            st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
-            st.session_state.distance_unit,
-            st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
-            coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
-        )
-
-        # Compute attributes (maybe with a spinner for large data)
-        with st.spinner("Computing GPR attributes..."):
-            gpr_attributes = compute_gpr_attributes(
-                st.session_state.processed_array,
-                y_axis_attr,
-                x_axis_attr
-            )
-
-        # Let user select which attribute to view
-        selected_attr = st.selectbox(
-            "Select Attribute to Visualize",
-            list(gpr_attributes.keys())
-        )
-
-        # Display options
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            attr_cmap = st.selectbox("Colormap", ["viridis", "grey", "RdBu", "jet", "plasma"], key="attr_cmap")
-        with col2:
-            show_colorbar = st.checkbox("Show Colorbar", True, key="attr_cbar")
-        with col3:
-            clip_percent = st.slider("Clip Percentile", 0.1, 5.0, 1.0, 0.1, 
-                                      help="Clip extreme values for better visualization") / 100.0
-
-        # Get the selected attribute data
-        attr_data = gpr_attributes[selected_attr]
-
-        # Clip for better visualization
-        vmin = np.percentile(attr_data, clip_percent * 100)
-        vmax = np.percentile(attr_data, 100 - clip_percent * 100)
-
-        # Plot the attribute
-        fig_attr, ax_attr = plt.subplots(figsize=(12, 8))
-        
-        # Use extent for proper axis scaling
-        extent = [x_axis_attr[0], x_axis_attr[-1], y_axis_attr[-1], y_axis_attr[0]]
-        
-        im = ax_attr.imshow(attr_data, extent=extent, aspect='auto', 
-                           cmap=attr_cmap, vmin=vmin, vmax=vmax)
-        
-        ax_attr.set_xlabel(x_label_attr)
-        ax_attr.set_ylabel(y_label_attr)
-        ax_attr.set_title(f"{selected_attr} Attribute Analysis")
-        ax_attr.grid(True, alpha=0.2, linestyle='--')
-        
-        if show_colorbar:
-            cbar = plt.colorbar(im, ax=ax_attr)
-            cbar.set_label(selected_attr)
-
-        st.pyplot(fig_attr)
-
-        # Add interpretation guide based on selected attribute
-        st.markdown("#### 🧠 Interpretation Guide")
-        if selected_attr == "Instantaneous Amplitude":
-            st.info("**High values** (bright spots) indicate significant impedance contrasts: layer boundaries, pipe tops, or voids. The apex of hyperbolas will show peak amplitude.")
-        elif selected_attr == "Instantaneous Phase":
-            st.info("**Continuous phase events** highlight reflector geometry regardless of amplitude. Excellent for tracing layer boundaries and identifying the symmetry axis of hyperbolas.")
-        elif selected_attr == "Cosine of Phase":
-            st.info("**Enhances reflector continuity** while suppressing amplitude effects. The bottom of reinforced layers can be interpreted through this attribute [citation:2].")
-        elif selected_attr == "Instantaneous Frequency":
-            st.info("**Frequency drops** (shifts to red/warmer colors) often indicate zones of signal attenuation, possibly due to fluids or fractures [citation:4].")
-        elif selected_attr == "Sweetness":
-            st.info("**High sweetness** (High Amp / Low Freq) can indicate sweet spots, potentially gas-charged sediments or high-porosity zones [citation:4].")
-        elif selected_attr == "Variance":
-            st.info("**High variance** indicates chaotic reflectors, useful for detecting fracture zones, edges of buried objects, or the tails of hyperbolas.")
-        elif selected_attr == "Similarity":
-            st.info("**Low similarity** (dark colors) indicates discontinuities - faults, object edges, or areas where the signal is disturbed by a buried target.")
-        else:
-            st.info("Refer to GPR literature for detailed interpretation of this attribute.")
-
-        # Add option to export attribute data
-        if st.button("📥 Export Current Attribute as CSV"):
-            attr_df = pd.DataFrame(attr_data, 
-                                  columns=[f"{xi:.2f}" for xi in x_axis_attr])
-            attr_csv = attr_df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=attr_csv,
-                file_name=f"gpr_{selected_attr.replace(' ', '_')}.csv",
-                mime="text/csv"
-            )
 
 # Initial state message
 elif not dzt_file:
@@ -3563,6 +3563,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
