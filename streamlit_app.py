@@ -1494,8 +1494,10 @@ def compute_gpr_attributes(radar_data, sample_axis, trace_axis):
     attributes['Sweetness'] = sweetness
 
     # 7. Variance Attribute (Texture)
-    #    High variance can indicate chaotic reflectors or hyperbola tails
-    variance_attr = variance(radar_data, size=[5, 5], mode='constant')
+    window_size_var = 5  # you can make this adjustable
+    mean = uniform_filter(radar_data, size=window_size_var, mode='constant')
+    mean_sq = uniform_filter(radar_data**2, size=window_size_var, mode='constant')
+    variance_attr = mean_sq - mean**2
     attributes['Variance'] = variance_attr
 
     # 8. Similarity Attribute (Coherence)
@@ -3563,6 +3565,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
