@@ -1892,7 +1892,7 @@ if dzt_file and process_btn:
 if st.session_state.data_loaded:
     # Create tabs - Added Deconvolution Analysis tab
     tab_names = ["📊 Header Info", "📈 Full View", "🔍 Custom Window", "🗺️ Coordinate View", 
-                 "📉 FFT Analysis", "🎛️ Gain Analysis", "🔬 Deconvolution Analysis", "💾 Export"]
+                 "📉 FFT Analysis", "🎛️ Gain Analysis", "🔬 Deconvolution Analysis", "💾 Export",📊 Attribute Analysis]
     tabs = st.tabs(tab_names)
     
     with tabs[0]:  # Header Info
@@ -3563,6 +3563,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
