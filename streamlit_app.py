@@ -1703,14 +1703,13 @@ def compute_attenuation_from_envelope(envelope, depth_axis, window_size=100, ove
     return alpha_section
 
 
-def attenuation_to_resistivity(alpha):
+def attenuation_to_resistivity(alpha, A=45.0):
     """
-    Convert attenuation α (nepers/m) to resistivity ρ (Ω·m) using Eq. (8).
-    ρ = 45 / α^1.15
+    Convert attenuation α (nepers/m) to resistivity ρ (Ω·m) using
+    ρ = A / α^1.15. Default A=45 from the paper.
     """
-    # Avoid division by zero / negative values
     alpha_safe = np.maximum(alpha, 1e-12)
-    resistivity = 45.0 / (alpha_safe ** 1.15)
+    resistivity = A / (alpha_safe ** 1.15)
     return resistivity
 
 
@@ -3774,7 +3773,40 @@ if st.session_state.data_loaded:
             show_alpha = st.checkbox("Show attenuation α", value=True)
             show_resistivity = st.checkbox("Show resistivity ρ", value=True)
             show_permittivity = st.checkbox("Show permittivity εᵣ", value=False)
-    
+            # --- Calibration with known resistivities ---
+            st.markdown("#### 🔬 Calibration with known resistivities")
+            use_calibration = st.checkbox("Calibrate coefficient A using known resistivity points")
+            
+            calibration_points = []
+            if use_calibration:
+                st.markdown("Enter one or more points where resistivity is known (e.g., from ERT).")
+                num_points = st.number_input("Number of calibration points", min_value=1, max_value=10, value=1, step=1)
+                for i in range(num_points):
+                    st.markdown(f"**Point {i+1}**")
+                    col_c1, col_c2, col_c3 = st.columns(3)
+                    with col_c1:
+                        # Allow trace index or distance
+                        coord_type = st.selectbox(f"Coordinate type", ["Trace index", "Distance (m)"], key=f"coord_type_{i}")
+                    with col_c2:
+                        if coord_type == "Trace index":
+                            trace_val = st.number_input(f"Trace index", min_value=0, max_value=n_traces-1, value=i, key=f"trace_idx_{i}")
+                            # We'll later convert to trace index directly
+                            cal_trace = trace_val
+                        else:
+                            dist_val = st.number_input(f"Distance (m)", min_value=0.0, max_value=x_axis_full[-1], value=10.0*i, key=f"dist_{i}")
+                            # Convert distance to nearest trace index later
+                            cal_trace = None  # placeholder
+                    with col_c3:
+                        depth_val = st.number_input(f"Depth (m)", min_value=0.0, max_value=depth_m[-1], value=2.0, key=f"depth_{i}")
+                        rho_known = st.number_input(f"Resistivity ρ (Ω·m)", min_value=0.1, max_value=1e6, value=100.0, key=f"rho_{i}")
+            
+                    calibration_points.append({
+                        'coord_type': coord_type,
+                        'trace_val': cal_trace if coord_type == "Trace index" else dist_val,
+                        'depth': depth_val,
+                        'rho': rho_known,
+                        'index': i
+                    })
             if st.button("🚀 Compute Resistivity Section", type="primary", use_container_width=True):
                 with st.spinner("Computing attenuation and resistivity..."):
                     # 1. Build depth axis (meters)
@@ -3800,12 +3832,65 @@ if st.session_state.data_loaded:
                     )
     
                     if smooth_alpha:
+                        if use_calibration and calibration_points:
+                            # Build distance axis for trace lookup
+                            if st.session_state.use_coords_for_distance and st.session_state.interpolated_coords:
+                                x_axis_local = st.session_state.interpolated_coords['distance']
+                            else:
+                                if st.session_state.distance_unit == "traces":
+                                    x_axis_local = np.arange(n_traces)
+                                else:
+                                    total_dist = st.session_state.total_distance if st.session_state.total_distance else 250.0
+                                    x_axis_local = np.linspace(0, total_dist, n_traces)
+                            
+                            log_alpha_vals = []
+                            log_rho_vals = []
+                            
+                            for pt in calibration_points:
+                                # Get trace index
+                                if pt['coord_type'] == "Trace index":
+                                    trace_idx = int(pt['trace_val'])
+                                else:
+                                    # Distance mode: find nearest trace index
+                                    trace_idx = np.argmin(np.abs(x_axis_local - pt['trace_val']))
+                                
+                                # Get depth index
+                                depth_idx = np.argmin(np.abs(depth_m - pt['depth']))
+                                
+                                alpha_val = alpha_section[depth_idx, trace_idx]
+                                if alpha_val > 0:
+                                    log_alpha_vals.append(np.log(alpha_val))
+                                    log_rho_vals.append(np.log(pt['rho']))
+                                else:
+                                    st.warning(f"Point at depth {pt['depth']}m, trace {trace_idx} has α≤0, skipping.")
+                            
+                            if len(log_alpha_vals) >= 1:
+                                # log(rho) = log(A) - 1.15 log(alpha)  => log(A) = log(rho) + 1.15 log(alpha)
+                                logA_estimates = [lr + 1.15 * la for lr, la in zip(log_rho_vals, log_alpha_vals)]
+                                logA = np.mean(logA_estimates)
+                                A_calibrated = np.exp(logA)
+                                st.success(f"Calibrated coefficient A = {A_calibrated:.3f} (based on {len(logA_estimates)} points)")
+                                st.session_state.calibrated_A = A_calibrated
+                                
+                                # Ask user whether to use calibrated A
+                                use_calib_choice = st.radio("Use calibrated A for conversion?", 
+                                                             ["Yes, use calibrated", "No, keep default 45"], 
+                                                             horizontal=True, key="calib_choice")
+                                if use_calib_choice == "Yes, use calibrated":
+                                    A_final = A_calibrated
+                                else:
+                                    A_final = 45.0
+                            else:
+                                st.error("No valid calibration points. Using default A=45.")
+                                A_final = 45.0
+                        else:
+                            A_final = 45.0
                         # Simple median filter along depth
                         from scipy.ndimage import median_filter
                         alpha_section = median_filter(alpha_section, size=(5, 1))
     
-                    # 5. Convert to resistivity and permittivity
-                    resistivity_section = attenuation_to_resistivity(alpha_section)
+                    # 5. Convert to resistivity and permittivity                    
+                    resistivity_section = attenuation_to_resistivity(alpha_section, A=A_final)
                     permittivity_section = resistivity_to_permittivity(resistivity_section)
     
                     # Store in session state for later export
@@ -4128,6 +4213,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
