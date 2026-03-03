@@ -3914,6 +3914,18 @@ if st.session_state.data_loaded:
             if 'resistivity_section' in st.session_state:
                 st.markdown("---")
                 st.subheader("Results")
+                                # Display options for resistivity (if shown)
+                if show_resistivity:
+                    st.markdown("##### Resistivity display options")
+                    col_r1, col_r2 = st.columns(2)
+                    with col_r1:
+                        rho_min = st.number_input("Min resistivity (Ω·m)", value=0.0, min_value=0.0, max_value=10000.0, step=1.0, key="rho_min")
+                    with col_r2:
+                        rho_max = st.number_input("Max resistivity (Ω·m)", value=200.0, min_value=1.0, max_value=100000.0, step=10.0, key="rho_max")
+                    clip_rho = st.checkbox("Clip resistivity to limits", value=True, key="clip_rho")
+                else:
+                    # Dummy values (not used)
+                    rho_min, rho_max, clip_rho = 0.0, 200.0, False
     
                 # Create a multi‑plot
                 plots_to_show = []
@@ -3945,8 +3957,18 @@ if st.session_state.data_loaded:
                     y_label = "Depth (m)"
     
                     for ax, (title, data) in zip(axes, plots_to_show):
-                        im = ax.imshow(data, extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
-                                       aspect='auto', cmap='viridis')
+                        if title == 'Resistivity ρ (Ω·m)' and clip_rho:
+                            # Clip data to user‑defined limits
+                            data_clipped = np.clip(data, rho_min, rho_max)
+                            im = ax.imshow(data_clipped,
+                                           extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
+                                           aspect='auto', cmap='viridis',
+                                           vmin=rho_min, vmax=rho_max)
+                        else:
+                            # For attenuation and permittivity, use automatic scaling
+                            im = ax.imshow(data,
+                                           extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
+                                           aspect='auto', cmap='viridis')
                         ax.set_xlabel(x_label)
                         ax.set_ylabel(y_label)
                         ax.set_title(title)
@@ -4221,6 +4243,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
