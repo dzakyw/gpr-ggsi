@@ -2834,45 +2834,138 @@ if st.session_state.data_loaded:
             st.pyplot(fig_coords)
             
             # ELECTRIC POLE ANOMALY COMPARISON PLOT
-            st.subheader("GPR Line Plot")
+            # =============================================================================
+            # GPR Line Plot with data source selection
+            # =============================================================================
+            st.subheader("GPR Line Plot – select data to display")
             
-            # Calculate elevation-adjusted depth for GPR display
+            # --- Data source selection ---
+            data_type = st.radio(
+                "Display data type",
+                ["Raw GPR", "Attribute", "Resistivity"],
+                horizontal=True,
+                key="coord_data_type"
+            )
+            
+            # Determine which array to show
+            display_data = None
+            data_label = ""
+            
+            if data_type == "Raw GPR":
+                display_data = st.session_state.processed_array
+                data_label = "Amplitude"
+                default_cmap = "seismic"
+            
+            elif data_type == "Attribute":
+                if "gpr_attributes" not in st.session_state:
+                    st.warning("No attributes computed. Please run Attribute Analysis first.")
+                    display_data = st.session_state.processed_array
+                    data_label = "Amplitude (fallback)"
+                    default_cmap = "seismic"
+                else:
+                    attr_list = list(st.session_state.gpr_attributes.keys())
+                    selected_attr = st.selectbox("Select attribute", attr_list)
+                    display_data = st.session_state.gpr_attributes[selected_attr]
+                    data_label = selected_attr
+                    default_cmap = "viridis"
+            
+            elif data_type == "Resistivity":
+                if "resistivity_section" not in st.session_state:
+                    st.warning("No resistivity section computed. Please run Resistivity Section first.")
+                    display_data = st.session_state.processed_array
+                    data_label = "Amplitude (fallback)"
+                    default_cmap = "seismic"
+                else:
+                    res_subtype = st.radio(
+                        "Resistivity data",
+                        ["Resistivity ρ", "Attenuation α", "Permittivity εᵣ"],
+                        horizontal=True
+                    )
+                    if res_subtype == "Resistivity ρ":
+                        display_data = st.session_state.resistivity_section
+                        data_label = "Resistivity (Ω·m)"
+                        default_cmap = "plasma"
+                    elif res_subtype == "Attenuation α":
+                        display_data = st.session_state.alpha_section
+                        data_label = "Attenuation α (nepers/m)"
+                        default_cmap = "viridis"
+                    else:
+                        display_data = st.session_state.permittivity_section
+                        data_label = "Permittivity εᵣ"
+                        default_cmap = "plasma"
+            
+            # Safety check
+            if display_data is None:
+                st.stop()
+            
+            # --- Colour scaling options ---
+            col_scale1, col_scale2 = st.columns(2)
+            with col_scale1:
+                p_low = st.slider("Low percentile", 0.0, 5.0, 1.0, 0.1) / 100.0
+            with col_scale2:
+                p_high = st.slider("High percentile", 95.0, 100.0, 99.0, 0.1) / 100.0
+            
+            vmin = np.percentile(display_data, p_low * 100)
+            vmax = np.percentile(display_data, p_high * 100)
+            
+            # Log scale option (only for resistivity)
+            use_log = False
+            if data_type == "Resistivity":
+                use_log = st.checkbox("Use logarithmic colour scale", value=False)
+            
+            from matplotlib.colors import Normalize, LogNorm
+            norm = LogNorm(vmin=vmin, vmax=vmax) if use_log else Normalize(vmin=vmin, vmax=vmax)
+            
+            # Colormap selection
+            colormap = st.selectbox("Colormap", ["seismic", "viridis", "plasma", "RdBu", "coolwarm"],
+                                    index=0 if default_cmap == "seismic" else 1)
+            
+            # --- Prepare elevation‑adjusted coordinates ---
             n_traces = st.session_state.processed_array.shape[1]
             n_samples = st.session_state.processed_array.shape[0]
             
-            # Create meshgrid for pcolormesh
+            # Depth axis (same as before)
+            if st.session_state.depth_unit != "samples":
+                depth_axis = np.linspace(0, st.session_state.max_depth, n_samples)
+            else:
+                depth_axis = np.arange(n_samples)
+            
+            # Create meshgrid
             X, Y = np.meshgrid(st.session_state.interpolated_coords['distance'], depth_axis)
             
-            # Adjust Y coordinates by elevation (convert depth to elevation)
+            # Elevation‑adjusted Y
             Y_elev = np.zeros_like(Y)
             for i in range(n_traces):
                 Y_elev[:, i] = st.session_state.interpolated_coords['elevation'][i] - depth_axis
             
+            # --- Plot using pcolormesh ---
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
-            if vmax_plot != vmin_plot:
-                normalized_array = 2 * (st.session_state.processed_array - vmin_plot) / (vmax_plot - vmin_plot) - 1
-            else:
-                normalized_array = st.session_state.processed_array - vmin_plot   # or np.zeros_like()
-
-            # Use pcolormesh for elevation-adjusted display
-            mesh = ax_elev.pcolormesh(X, Y_elev, st.session_state.processed_array,vmin=vmin_plot, vmax=vmax_plot,
-                                     cmap='seismic', shading='auto', alpha=0.9)
+            
+            mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=colormap,
+                                      shading='auto', alpha=0.9)
+            
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
-            ax_elev.set_title('GPR Section')
+            ax_elev.set_title(f'{data_label} – Topographic profile')
             ax_elev.grid(True, alpha=0.2)
-            plt.colorbar(mesh, ax=ax_elev, label='Amplitude')
+            plt.colorbar(mesh, ax=ax_elev, label=data_label)
             
             # Add topographic surface line
             ax_elev.plot(st.session_state.interpolated_coords['distance'],
-                        st.session_state.interpolated_coords['elevation'],
-                        'k-', linewidth=1, alpha=0.8, label='Surface')
+                         st.session_state.interpolated_coords['elevation'],
+                         'k-', linewidth=1, alpha=0.8, label='Surface')
             ax_elev.fill_between(st.session_state.interpolated_coords['distance'],
-                                Y_elev.min(), st.session_state.interpolated_coords['elevation'],
-                                alpha=0.1, color='gray')
+                                 Y_elev.min(), st.session_state.interpolated_coords['elevation'],
+                                 alpha=0.1, color='gray')
             
-            # Mark electric poles on the surface
+            # Mark electric poles on the surface (if available)
             if pole_data is not None:
+                # Re‑create the elevation interpolator if not already in scope
+                from scipy.interpolate import interp1d
+                elev_interp = interp1d(st.session_state.interpolated_coords['distance'],
+                                       st.session_state.interpolated_coords['elevation'],
+                                       kind='linear', fill_value='extrapolate')
+            
                 for i in range(len(pole_data['projected_distances'])):
                     pole_elev = elev_interp(pole_data['projected_distances'][i])
                     if 'TS' in str(pole_data['names'][i]):
@@ -2887,41 +2980,30 @@ if st.session_state.data_loaded:
                         color = 'orange'
                         marker = 'o'
                         label = 'CPT'
-                    
-                    # Plot pole at surface elevation
+            
                     ax_elev.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
-                                   c=color, marker=marker, s=100, 
-                                    alpha=0.9, zorder=10)
-                    
-                    # Add vertical dashed line from pole to bottom of plot
-                    #ax_elev.plot([pole_data['projected_distances'][i], pole_data['projected_distances'][i]],
-                     #           [pole_elev, Y_elev.min()],
-                      #          color=color, linestyle='--', alpha=0.5, linewidth=1)
-                    
+                                    c=color, marker=marker, s=100, alpha=0.9, zorder=10)
+            
                     # Add pole name
                     ax_elev.text(pole_data['projected_distances'][i], pole_elev + 1,
-                                pole_data['names'][i], fontsize=6, ha='center')
-                
+                                 pole_data['names'][i], fontsize=6, ha='center')
+            
                 # Create custom legend for poles
                 from matplotlib.lines import Line2D
                 legend_elements = [
-                    Line2D([0], [0], marker='^', color='w', markerfacecolor='red', 
-                          markersize=10, label='TS Pole'),
-                    Line2D([0], [0], marker='^', color='w', markerfacecolor='purple', 
-                          markersize=10, label='TL Pole'),
-                    Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', 
-                          markersize=10, label='Other Pole'),
-                    Line2D([0], [0], color='k', linewidth=2, label='Surface'),
-                    Line2D([0], [0], color='gray', alpha=0.1, linewidth=10, label='Subsurface')
+                    Line2D([0], [0], marker='^', color='w', markerfacecolor='red',
+                           markersize=10, label='TS Pole'),
+                    Line2D([0], [0], marker='^', color='w', markerfacecolor='purple',
+                           markersize=10, label='TL Pole'),
+                    Line2D([0], [0], marker='o', color='w', markerfacecolor='orange',
+                           markersize=10, label='Other Pole'),
+                    Line2D([0], [0], color='k', linewidth=2, label='Surface')
                 ]
                 ax_elev.legend(handles=legend_elements, loc='upper right')
             
-            ax_elev.legend()
             ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
-            
             plt.tight_layout()
             st.pyplot(fig_elev)
-            
             # Display pole information table
             if pole_data is not None:
                 st.subheader("Electric Pole Information")
@@ -3479,6 +3561,8 @@ if st.session_state.data_loaded:
                 y_axis_attr,
                 x_axis_attr
             )
+        # Store attributes for use in other tabs
+        st.session_state.gpr_attributes = gpr_attributes
     
         # --- Select attribute to display ---
         selected_attr = st.selectbox(
@@ -4044,6 +4128,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
