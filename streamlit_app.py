@@ -3962,7 +3962,7 @@ if st.session_state.data_loaded:
                             data_clipped = np.clip(data, rho_min, rho_max)
                             im = ax.imshow(data_clipped,
                                            extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
-                                           aspect='auto', cmap='viridis',
+                                           aspect='auto', cmap='rainbow',
                                            vmin=rho_min, vmax=rho_max)
                         else:
                             # For attenuation and permittivity, use automatic scaling
@@ -4243,6 +4243,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
