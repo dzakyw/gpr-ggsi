@@ -1619,6 +1619,108 @@ def export_gpr_to_segy_obspy(processed_array, coords, sample_interval_us=1.0):
             os.unlink(tmp_filename)
 
     return segy_bytes
+
+def geometric_correction(data, sample_axis, velocity, tx_rx_sep, K=1000, apply_dipole=True):
+    """
+    Apply geometric correction (spherical divergence + dipole effect) to each trace.
+    Based on paper Eq. (4): propagation_function = K * cosθ / d²
+    """
+    n_samples, n_traces = data.shape
+    corrected = np.zeros_like(data, dtype=np.float64)
+
+    # Depth axis (two‑way travel depth)
+    depth = sample_axis  # in meters
+
+    for i in range(n_traces):
+        for j, z in enumerate(depth):
+            # Traveled distance d (two‑way) in meters
+            d = 2 * z
+            if d <= 0:
+                corrected[j, i] = data[j, i]
+                continue
+
+            # Approximate cosθ: dipole effect – maximum at depth, zero at surface
+            # We use a simple linear ramp from 0 to 1 over the first few meters
+            # (you can replace this with a more accurate model if needed)
+            if apply_dipole:
+                # Assume cosθ increases from 0 at z=0 to 1 at z = tx_rx_sep (or some characteristic depth)
+                # Here we use a simple saturation function
+                cos_theta = min(1.0, z / tx_rx_sep) if tx_rx_sep > 0 else 1.0
+            else:
+                cos_theta = 1.0
+
+            # Propagation function (paper Eq. 4)
+            prop = K * cos_theta / (d ** 2)
+
+            # Avoid division by zero / extreme values
+            if prop > 0:
+                corrected[j, i] = data[j, i] / prop
+            else:
+                corrected[j, i] = data[j, i]
+
+    return corrected
+
+
+def compute_envelope(data):
+    """Compute instantaneous amplitude (envelope) using Hilbert transform."""
+    analytic = hilbert(data, axis=0)
+    envelope = np.abs(analytic)
+    return envelope
+
+
+def compute_attenuation_from_envelope(envelope, depth_axis, window_size=100, overlap=20):
+    """
+    Estimate attenuation coefficient α (nepers/m) by sliding window exponential fit.
+    Returns a 2D array of α values (same shape as envelope, with edges padded).
+    """
+    n_samples, n_traces = envelope.shape
+    alpha_section = np.zeros_like(envelope)
+
+    # To avoid log(0), add a tiny epsilon
+    eps = 1e-12
+    log_env = np.log(envelope + eps)
+
+    step = window_size - overlap
+    for i in range(n_traces):
+        trace_log = log_env[:, i]
+        for start in range(0, n_samples - window_size + 1, step):
+            end = start + window_size
+            # Linear regression: log(env) = log(I0) - α * depth
+            x = depth_axis[start:end]
+            y = trace_log[start:end]
+            if len(x) < 2:
+                continue
+            # Fit polynomial degree 1
+            coeffs = np.polyfit(x, y, 1)
+            alpha = -coeffs[0]  # slope = -α
+            alpha_section[start:end, i] = alpha
+        # Handle edges (copy nearest value)
+        # left edge
+        alpha_section[:window_size//2, i] = alpha_section[window_size//2, i]
+        # right edge
+        alpha_section[-(window_size//2):, i] = alpha_section[-(window_size//2)-1, i]
+
+    return alpha_section
+
+
+def attenuation_to_resistivity(alpha):
+    """
+    Convert attenuation α (nepers/m) to resistivity ρ (Ω·m) using Eq. (8).
+    ρ = 45 / α^1.15
+    """
+    # Avoid division by zero / negative values
+    alpha_safe = np.maximum(alpha, 1e-12)
+    resistivity = 45.0 / (alpha_safe ** 1.15)
+    return resistivity
+
+
+def resistivity_to_permittivity(resistivity):
+    """
+    Convert resistivity ρ (Ω·m) to relative permittivity ε_r using Eq. (7).
+    ε_r = 44 / ρ^(1/4)
+    """
+    permittivity = 44.0 / (np.maximum(resistivity, 1e-12) ** 0.25)
+    return permittivity
 # Main content
 if dzt_file and process_btn:
     with st.spinner("Processing radar data..."):
@@ -1999,7 +2101,8 @@ if dzt_file and process_btn:
 if st.session_state.data_loaded:
     # Create tabs - Added Deconvolution Analysis tab
     tab_names = ["📊 Header Info", "📈 Full View", "🔍 Custom Window", "🗺️ Coordinate View", 
-                 "📉 FFT Analysis", "🎛️ Gain Analysis", "🔬 Deconvolution Analysis", "📊 Attribute Analysis","💾 Export"]
+             "📉 FFT Analysis", "🎛️ Gain Analysis", "🔬 Deconvolution Analysis","📊 Attribute Analysis",
+             "⚡ Resistivity Section",  "💾 Export"]
     tabs = st.tabs(tab_names)
     
     with tabs[0]:  # Header Info
@@ -3521,7 +3624,179 @@ if st.session_state.data_loaded:
                 file_name=f"gpr_{selected_attr.replace(' ', '_')}.csv",
                 mime="text/csv"
             )
-    with tabs[8]:  # Export
+    with tabs[8]:  # Resistivity Section
+        st.subheader("⚡ Resistivity Section from Attenuation Analysis")
+        st.markdown("Based on Arevalo-Lomas et al. (2022) – *Processing Radargrams to Obtain Resistivity Sections*")
+    
+        if not st.session_state.data_loaded:
+            st.warning("Load a DZT file first.")
+        else:
+            # Choose which data to use
+            data_choice = st.radio(
+                "Select input data",
+                ["Original", "Processed", "Deconvolved"],
+                index=1,
+                horizontal=True,
+                key="resistivity_data_choice"
+            )
+            if data_choice == "Original":
+                input_array = st.session_state.original_array
+            elif data_choice == "Processed":
+                input_array = st.session_state.processed_array
+            else:
+                if st.session_state.deconvolved_array is not None:
+                    input_array = st.session_state.deconvolved_array
+                else:
+                    st.error("No deconvolved data available. Use Processed instead.")
+                    input_array = st.session_state.processed_array
+    
+            n_samples, n_traces = input_array.shape
+    
+            # Get header info if available
+            header = st.session_state.header
+            ant_freq = header.get('ant_freq', 500) if header else 500
+            default_txrx = 0.18  # typical for 500 MHz antenna
+            default_vel = 0.08    # m/ns (approx 100 Ω·m)
+    
+            # Parameters sidebar inside the tab (or use st.columns)
+            col1, col2 = st.columns(2)
+            with col1:
+                freq_mhz = st.number_input("Antenna frequency (MHz)", min_value=10, max_value=2000, value=ant_freq, step=10)
+                tx_rx_sep = st.number_input("Tx‑Rx separation (m)", min_value=0.01, max_value=2.0, value=default_txrx, step=0.01)
+                velocity = st.number_input("Wave velocity (m/ns)", min_value=0.01, max_value=0.3, value=default_vel, step=0.01, format="%.3f")
+            with col2:
+                # Sampling interval from header or manual
+                if header and 'time_range_ns' in header and 'spt' in header:
+                    default_dt_ns = header['time_range_ns'] / header['spt']
+                else:
+                    default_dt_ns = 0.176  # typical for 500 MHz
+                dt_ns = st.number_input("Sampling interval (ns)", min_value=0.01, max_value=10.0, value=default_dt_ns, step=0.01, format="%.3f")
+                K_const = st.number_input("Geometric constant K", min_value=1, max_value=10000, value=1000, step=100)
+                apply_geom = st.checkbox("Apply geometric correction", value=True)
+                apply_dipole = st.checkbox("Include dipole effect (cosθ)", value=True)
+    
+            # Windowing parameters
+            st.markdown("#### Attenuation fitting window")
+            col_w1, col_w2, col_w3 = st.columns(3)
+            with col_w1:
+                window_size = st.number_input("Window size (samples)", min_value=10, max_value=500, value=100, step=5)
+            with col_w2:
+                overlap = st.number_input("Overlap (samples)", min_value=1, max_value=window_size-1, value=20, step=1)
+            with col_w3:
+                smooth_alpha = st.checkbox("Smooth α section", value=True)
+    
+            # Convert to resistivity/permittivity options
+            st.markdown("#### Output options")
+            show_alpha = st.checkbox("Show attenuation α", value=True)
+            show_resistivity = st.checkbox("Show resistivity ρ", value=True)
+            show_permittivity = st.checkbox("Show permittivity εᵣ", value=False)
+    
+            if st.button("🚀 Compute Resistivity Section", type="primary", use_container_width=True):
+                with st.spinner("Computing attenuation and resistivity..."):
+                    # 1. Build depth axis (meters)
+                    #    time axis: t = sample_index * dt_ns  (ns)
+                    #    depth = velocity * t / 2   (two‑way)
+                    time_ns = np.arange(n_samples) * dt_ns
+                    depth_m = velocity * time_ns / 2.0   # in meters
+    
+                    # 2. Geometric correction if requested
+                    data_for_analysis = input_array.copy()
+                    if apply_geom:
+                        data_for_analysis = geometric_correction(
+                            data_for_analysis, depth_m, velocity, tx_rx_sep,
+                            K=K_const, apply_dipole=apply_dipole
+                        )
+    
+                    # 3. Compute envelope (instantaneous amplitude)
+                    envelope = compute_envelope(data_for_analysis)
+    
+                    # 4. Compute attenuation α (nepers/m)
+                    alpha_section = compute_attenuation_from_envelope(
+                        envelope, depth_m, window_size=window_size, overlap=overlap
+                    )
+    
+                    if smooth_alpha:
+                        # Simple median filter along depth
+                        from scipy.ndimage import median_filter
+                        alpha_section = median_filter(alpha_section, size=(5, 1))
+    
+                    # 5. Convert to resistivity and permittivity
+                    resistivity_section = attenuation_to_resistivity(alpha_section)
+                    permittivity_section = resistivity_to_permittivity(resistivity_section)
+    
+                    # Store in session state for later export
+                    st.session_state.alpha_section = alpha_section
+                    st.session_state.resistivity_section = resistivity_section
+                    st.session_state.permittivity_section = permittivity_section
+                    st.session_state.resistivity_depth = depth_m
+                    st.session_state.resistivity_x = x_axis_full  # from full view scaling
+    
+                    st.success("Resistivity section computed!")
+    
+            # Display results if available
+            if 'resistivity_section' in st.session_state:
+                st.markdown("---")
+                st.subheader("Results")
+    
+                # Create a multi‑plot
+                plots_to_show = []
+                if show_alpha:
+                    plots_to_show.append(('Attenuation α (nepers/m)', st.session_state.alpha_section))
+                if show_resistivity:
+                    plots_to_show.append(('Resistivity ρ (Ω·m)', st.session_state.resistivity_section))
+                if show_permittivity:
+                    plots_to_show.append(('Relative Permittivity εᵣ', st.session_state.permittivity_section))
+    
+                n_plots = len(plots_to_show)
+                if n_plots > 0:
+                    fig, axes = plt.subplots(1, n_plots, figsize=(6*n_plots, 6))
+                    if n_plots == 1:
+                        axes = [axes]
+    
+                    # Get x and y axes (use full view scaling)
+                    x_axis, y_axis, x_label, y_label, _, _ = scale_axes(
+                        st.session_state.processed_array.shape,
+                        st.session_state.depth_unit,
+                        st.session_state.max_depth if hasattr(st.session_state, 'max_depth') else None,
+                        st.session_state.distance_unit,
+                        st.session_state.total_distance if hasattr(st.session_state, 'total_distance') else None,
+                        coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
+                    )
+                    # But our depth is in meters, we need to use the computed depth_m
+                    # Override y_axis with depth_m
+                    y_axis = st.session_state.resistivity_depth
+                    y_label = "Depth (m)"
+    
+                    for ax, (title, data) in zip(axes, plots_to_show):
+                        im = ax.imshow(data, extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
+                                       aspect='auto', cmap='viridis')
+                        ax.set_xlabel(x_label)
+                        ax.set_ylabel(y_label)
+                        ax.set_title(title)
+                        ax.grid(True, alpha=0.2)
+                        plt.colorbar(im, ax=ax)
+    
+                    plt.tight_layout()
+                    st.pyplot(fig)
+    
+                    # Export options
+                    st.markdown("#### Export")
+                    col_exp1, col_exp2, col_exp3 = st.columns(3)
+                    with col_exp1:
+                        # Export alpha as CSV
+                        alpha_df = pd.DataFrame(st.session_state.alpha_section, columns=[f"{xi:.2f}" for xi in x_axis])
+                        csv_alpha = alpha_df.to_csv(index=False)
+                        st.download_button("📥 Download α CSV", csv_alpha, "alpha_section.csv", "text/csv")
+                    with col_exp2:
+                        rho_df = pd.DataFrame(st.session_state.resistivity_section, columns=[f"{xi:.2f}" for xi in x_axis])
+                        csv_rho = rho_df.to_csv(index=False)
+                        st.download_button("📥 Download ρ CSV", csv_rho, "resistivity_section.csv", "text/csv")
+                    with col_exp3:
+                        if show_permittivity:
+                            eps_df = pd.DataFrame(st.session_state.permittivity_section, columns=[f"{xi:.2f}" for xi in x_axis])
+                            csv_eps = eps_df.to_csv(index=False)
+                            st.download_button("📥 Download εᵣ CSV", csv_eps, "permittivity_section.csv", "text/csv")
+    with tabs[9]:  # Export
         st.subheader("Export Processed Data")
         
         # Export options in columns
@@ -3769,6 +4044,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
