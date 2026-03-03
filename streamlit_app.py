@@ -3797,7 +3797,7 @@ if st.session_state.data_loaded:
                             # Convert distance to nearest trace index later
                             cal_trace = None  # placeholder
                     with col_c3:
-                        depth_val = st.number_input(f"Depth (m)", min_value=0.0, max_value=depth_m[-1], value=2.0, key=f"depth_{i}")
+                        depth_val = st.number_input(f"Depth (m)", min_value=0.0, max_value=50.0, value=2.0, key=f"depth_{i}")
                         rho_known = st.number_input(f"Resistivity ρ (Ω·m)", min_value=0.1, max_value=1e6, value=100.0, key=f"rho_{i}")
             
                     calibration_points.append({
@@ -4213,6 +4213,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
