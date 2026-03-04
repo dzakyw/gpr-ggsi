@@ -2852,7 +2852,7 @@ if st.session_state.data_loaded:
             
             if data_type == "Raw GPR":
                 display_data = st.session_state.processed_array
-                data_label = "Amplitude"
+                data_label = "GPR Section"
                 default_cmap = "seismic"
             
             elif data_type == "Attribute":
@@ -2941,7 +2941,7 @@ if st.session_state.data_loaded:
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
             
             mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=colormap,
-                                      shading='auto', alpha=0.9)
+                                      shading='auto', alpha=0.8)
             
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
@@ -4243,6 +4243,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
