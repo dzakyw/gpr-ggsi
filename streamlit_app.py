@@ -629,7 +629,7 @@ with st.sidebar:
     use_freq_filter = st.checkbox("Apply Frequency Filter", False,
                                   help="Replace the built‑in filter with a custom design")
     if use_freq_filter:
-        fs_mhz = fs_manual 
+        
         with st.expander("Filter Settings", expanded=True):
             filter_type = st.selectbox(
                 "Filter type",
@@ -1867,6 +1867,7 @@ if dzt_file and process_btn:
                     
                     # Apply custom frequency filter if requested
                     if use_freq_filter:
+                        fs_mhz = fs_manual 
                         # Determine sampling frequency from header or use a default
                         if header and 'freq' in header:
                             fs_mhz = header['freq']   # assuming header contains antenna frequency? Not exactly.
@@ -4331,6 +4332,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
