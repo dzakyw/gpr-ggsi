@@ -629,6 +629,7 @@ with st.sidebar:
     use_freq_filter = st.checkbox("Apply Frequency Filter", False,
                                   help="Replace the built‑in filter with a custom design")
     if use_freq_filter:
+        fs_mhz = fs_manual 
         with st.expander("Filter Settings", expanded=True):
             filter_type = st.selectbox(
                 "Filter type",
@@ -650,8 +651,8 @@ with st.sidebar:
                         stop_atten = st.number_input("Stopband attenuation (dB)", 10.0, 100.0, 40.0, 5.0)
             
             # Optional manual sampling rate
-            fs_manual = st.number_input("Sampling rate (MHz) – if header unreliable", 
-                                        10, 10000, 1000, 10)
+            fs_manual = st.number_input("Sampling rate (MHz)", 10, 10000, 1545, 10,
+                            help="Enter the sampling frequency in MHz (e.g., 1545 for your 1024‑sample, 662.5 ns data)")
     
     process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
 
@@ -4330,6 +4331,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
