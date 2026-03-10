@@ -618,7 +618,14 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("⚙️ Advanced Processing")
-    
+    # --- inside the "Advanced Processing" section ---
+    st.markdown("---")
+    st.header("🔽 Resampling")
+    resample_to_1024 = st.checkbox(
+        "Resample 2048 → 1024 samples (average pairs)",
+        False,
+        help="If your data has 2048 samples, this averages adjacent samples to 1024, improving signal‑to‑noise and matching 1024‑sample data appearance."
+    )
     bgr = st.checkbox("Apply Background Removal", False)
     if bgr:
         bgr_type = st.selectbox("BGR Type", ["Full-width", "Boxcar"])
@@ -4250,6 +4257,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
