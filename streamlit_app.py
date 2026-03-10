@@ -618,27 +618,41 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("⚙️ Advanced Processing")
-    # --- inside the "Advanced Processing" section ---
-    st.markdown("---")
-    st.header("🔽 Resampling")
-    resample_to_1024 = st.checkbox(
-        "Resample 2048 → 1024 samples (average pairs)",
-        False,
-        help="If your data has 2048 samples, this averages adjacent samples to 1024, improving signal‑to‑noise and matching 1024‑sample data appearance."
-    )
+    
     bgr = st.checkbox("Apply Background Removal", False)
     if bgr:
         bgr_type = st.selectbox("BGR Type", ["Full-width", "Boxcar"])
         if bgr_type == "Boxcar":
             bgr_window = st.slider("Boxcar Window", 10, 500, 100)
     
-    freq_filter = st.checkbox("Apply Frequency Filter", False)
-    if freq_filter:
-        col1, col2 = st.columns(2)
-        with col1:
-            freq_min = st.number_input("Min Freq (MHz)", 10, 500, 60)
-        with col2:
-            freq_max = st.number_input("Max Freq (MHz)", 10, 1000, 130)
+
+    use_freq_filter = st.checkbox("Apply Frequency Filter", False,
+                                  help="Replace the built‑in filter with a custom design")
+    if use_freq_filter:
+        
+        with st.expander("Filter Settings", expanded=True):
+            filter_type = st.selectbox(
+                "Filter type",
+                ["Butterworth (IIR)", "Chebyshev I (IIR)", "Chebyshev II (IIR)", 
+                 "Elliptic (IIR)", "FIR (window)", "FIR (least squares)"]
+            )
+            
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                fc_low = st.number_input("Low cutoff (MHz)", 0.0, 2000.0, 60.0, 1.0)
+                order = st.number_input("Filter order", 1, 20, 4, 1)
+            with col_f2:
+                fc_high = st.number_input("High cutoff (MHz)", 0.0, 2000.0, 130.0, 1.0)
+                if filter_type.startswith("FIR"):
+                    window = st.selectbox("Window", ["hamming", "hann", "blackman", "kaiser"])
+                else:
+                    ripple = st.number_input("Passband ripple (dB)", 0.1, 10.0, 1.0, 0.1)
+                    if "Elliptic" in filter_type:
+                        stop_atten = st.number_input("Stopband attenuation (dB)", 10.0, 100.0, 40.0, 5.0)
+            
+            # Optional manual sampling rate
+            fs_manual = st.number_input("Sampling rate (MHz)", 10, 10000, 1545, 10,
+                            help="Enter the sampling frequency in MHz (e.g., 1545 for your 1024‑sample, 662.5 ns data)")
     
     process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
 
@@ -1062,7 +1076,54 @@ def apply_gain(array, gain_type, **kwargs):
         return array * gain_vector
     
     return array
-
+def apply_custom_filter(data, filter_type, fc_low, fc_high, order, 
+                        fs_mhz, ripple=None, stop_atten=None, window='hamming'):
+    """
+    Apply a zero‑phase bandpass filter to each trace.
+    
+    Parameters:
+        data : 2D array (samples, traces)
+        filter_type : string, one of the supported types
+        fc_low, fc_high : cutoff frequencies in MHz
+        order : filter order
+        fs_mhz : sampling frequency in MHz
+        ripple, stop_atten, window : specific to filter type
+    Returns:
+        filtered_data : 2D array, same shape as data
+    """
+    from scipy.signal import butter, cheby1, cheby2, ellip, firwin, firls, filtfilt
+    
+    nyq = 0.5 * fs_mhz
+    low = fc_low / nyq
+    high = fc_high / nyq
+    
+    # Design the filter
+    if filter_type == "Butterworth (IIR)":
+        b, a = butter(order, [low, high], btype='band')
+    elif filter_type == "Chebyshev I (IIR)":
+        b, a = cheby1(order, ripple, [low, high], btype='band')
+    elif filter_type == "Chebyshev II (IIR)":
+        b, a = cheby2(order, stop_atten, [low, high], btype='band')
+    elif filter_type == "Elliptic (IIR)":
+        b, a = ellip(order, ripple, stop_atten, [low, high], btype='band')
+    elif filter_type == "FIR (window)":
+        numtaps = order + 1
+        b = firwin(numtaps, [low, high], window=window, pass_zero='bandpass')
+        a = [1.0]
+    elif filter_type == "FIR (least squares)":
+        numtaps = order + 1
+        bands = [0, low, low, high, high, 1.0]
+        desired = [0, 0, 1, 1, 0, 0]
+        b = firls(numtaps, bands, desired, fs=2)   # fs=2 because we normalized to Nyquist=1
+        a = [1.0]
+    else:
+        return data
+    
+    # Apply zero‑phase filter to each trace
+    filtered = np.zeros_like(data)
+    for i in range(data.shape[1]):
+        filtered[:, i] = filtfilt(b, a, data[:, i])
+    return filtered
 def apply_near_surface_correction(array, correction_type, correction_depth, max_depth, **kwargs):
     """Apply near-surface amplitude correction to reduce high amplitudes in shallow region"""
     n_samples, n_traces = array.shape
@@ -1774,11 +1835,11 @@ if dzt_file and process_btn:
                 progress_bar.progress(40)
                 
                 # Build parameters for readgssi
-                params = {
-                    'infile': dzt_path,
-                    'zero': [time_zero],
-                    'verbose': False
-                }
+                params = {'infile': dzt_path,
+                        'zero': [time_zero],
+                        'verbose': False
+                         }
+
                 
                 # Add stacking
                 if stacking == "auto":
@@ -1793,11 +1854,6 @@ if dzt_file and process_btn:
                     else:
                         params['bgr'] = bgr_window
                 
-                # Add frequency filter
-                if freq_filter:
-                    params['freqmin'] = freq_min
-                    params['freqmax'] = freq_max
-                
                 progress_bar.progress(50)
                 
                 # Read data
@@ -1808,14 +1864,33 @@ if dzt_file and process_btn:
                 # Store original array
                 if arrays and len(arrays) > 0:
                     original_array = arrays[0]
-                    # ---- NEW: optional resampling ----
-                    if resample_to_1024 and original_array.shape[0] == 2048:
-                        if original_array.shape[0] % 2 == 0:
-                            original_array = (original_array[0::2, :] + original_array[1::2, :]) / 2
-                            st.info("✅ Resampled from 2048 to 1024 samples.")
+                    
+                    # Apply custom frequency filter if requested
+                    if use_freq_filter:
+                        fs_mhz = fs_manual 
+                        # Determine sampling frequency from header or use a default
+                        if header and 'freq' in header:
+                            fs_mhz = header['freq']   # assuming header contains antenna frequency? Not exactly.
+                            # Better: get sampling interval from header
+                            # Typically DZT headers have time window and samples per trace -> dt
                         else:
-                            st.warning("Odd sample count; resampling skipped.")
-
+                            # Fallback to user input or 1000 MHz
+                            fs_mhz = 1000.0   # you could add a number_input for sampling rate if needed
+                        
+                        # You may need to compute sampling rate from header:
+                        if header and 'time_range_ns' in header and 'spt' in header:
+                            dt_ns = header['time_range_ns'] / header['spt']
+                            fs_mhz = 1000.0 / dt_ns   # convert ns to MHz: 1/(dt_ns*1e-9)/1e6 = 1000/dt_ns
+                        else:
+                            # Fallback as above
+                            fs_mhz = 1000.0
+                        
+                        original_array = apply_custom_filter(
+                            original_array, filter_type, fc_low, fc_high, order, fs_mhz,
+                            ripple=ripple if 'ripple' in locals() else None,
+                            stop_atten=stop_atten if 'stop_atten' in locals() else None,
+                            window=window if 'window' in locals() else 'hamming'
+                        )
                     # Apply line reversal if requested
                     if reverse_line:
                         original_array = reverse_array(original_array)
@@ -4257,6 +4332,9 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
+
+
 
 
 
