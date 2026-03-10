@@ -1834,7 +1834,11 @@ if dzt_file and process_btn:
                 progress_bar.progress(40)
                 
                 # Build parameters for readgssi
-                
+                params = {'infile': dzt_path,
+                        'zero': [time_zero],
+                        'verbose': False
+                         }
+
                 
                 # Add stacking
                 if stacking == "auto":
@@ -4326,6 +4330,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
