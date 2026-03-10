@@ -1801,7 +1801,14 @@ if dzt_file and process_btn:
                 # Store original array
                 if arrays and len(arrays) > 0:
                     original_array = arrays[0]
-                    
+                    # ---- NEW: optional resampling ----
+                    if resample_to_1024 and original_array.shape[0] == 2048:
+                        if original_array.shape[0] % 2 == 0:
+                            original_array = (original_array[0::2, :] + original_array[1::2, :]) / 2
+                            st.info("✅ Resampled from 2048 to 1024 samples.")
+                        else:
+                            st.warning("Odd sample count; resampling skipped.")
+
                     # Apply line reversal if requested
                     if reverse_line:
                         original_array = reverse_array(original_array)
@@ -4243,6 +4250,7 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
 
 
