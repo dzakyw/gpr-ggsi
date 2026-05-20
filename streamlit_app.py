@@ -2809,12 +2809,17 @@ if st.session_state.data_loaded:
             else:
                 depth_axis = np.arange(st.session_state.processed_array.shape[0])
             
+            # AUTO-NORMALIZATION: same as Full View (symmetric percentile)
+            vmax_auto = np.percentile(np.abs(st.session_state.processed_array), 99)
+            vmin_auto = -vmax_auto
+            
             # Plot GPR data with coordinate-based distance
             im = ax4.imshow(st.session_state.processed_array,
                           extent=[st.session_state.interpolated_coords['distance'][0],
                                  st.session_state.interpolated_coords['distance'][-1],
                                  depth_axis[-1], depth_axis[0]],
-                          aspect=aspect_value_coords, cmap='seismic', alpha=0.9)
+                          aspect=aspect_value_coords, cmap='seismic', alpha=0.9,
+                          vmin=vmin_auto, vmax=vmax_auto)
             ax4.set_xlabel('Distance along profile (m)')
             ax4.set_ylabel(f'Depth ({st.session_state.depth_unit})')
             ax4.set_title(f'GPR Data with Coordinate Scaling (Aspect: {aspect_value_coords})')
@@ -2849,6 +2854,7 @@ if st.session_state.data_loaded:
             # Determine which array to show
             display_data = None
             data_label = ""
+            default_cmap = "seismic"
             
             if data_type == "Raw GPR":
                 display_data = st.session_state.processed_array
@@ -2897,23 +2903,23 @@ if st.session_state.data_loaded:
             if display_data is None:
                 st.stop()
             
-            # --- Colour scaling options ---
-            col_scale1, col_scale2 = st.columns(2)
-            with col_scale1:
-                p_low = st.slider("Low percentile", 0.0, 5.0, 1.0, 0.1) / 100.0
-            with col_scale2:
-                p_high = st.slider("High percentile", 95.0, 100.0, 99.0, 0.1) / 100.0
-            
-            vmin = np.percentile(display_data, p_low * 100)
-            vmax = np.percentile(display_data, p_high * 100)
-            
-            # Log scale option (only for resistivity)
-            use_log = False
-            if data_type == "Resistivity":
-                use_log = st.checkbox("Use logarithmic colour scale", value=False)
-            
-            from matplotlib.colors import Normalize, LogNorm
-            norm = LogNorm(vmin=vmin, vmax=vmax) if use_log else Normalize(vmin=vmin, vmax=vmax)
+            # AUTO-NORMALIZATION: symmetric for Raw GPR (like Full View), otherwise use data range percentiles
+            if data_type == "Raw GPR":
+                vmax_auto_line = np.percentile(np.abs(display_data), 99)
+                vmin_auto_line = -vmax_auto_line
+                use_log = False
+                norm = None
+            else:
+                # For attributes and resistivity, use percentile based on positive values (or symmetric if negative present)
+                if np.any(display_data < 0):
+                    # Use symmetric normalization for bipolar data
+                    vmax_auto_line = np.percentile(np.abs(display_data), 99)
+                    vmin_auto_line = -vmax_auto_line
+                else:
+                    vmin_auto_line = np.percentile(display_data, 1)
+                    vmax_auto_line = np.percentile(display_data, 99)
+                use_log = False
+                norm = None
             
             # Colormap selection
             colormap = st.selectbox("Colormap", ["seismic", "viridis", "plasma", "RdBu", "coolwarm"],
@@ -2937,11 +2943,12 @@ if st.session_state.data_loaded:
             for i in range(n_traces):
                 Y_elev[:, i] = st.session_state.interpolated_coords['elevation'][i] - depth_axis
             
-            # --- Plot using pcolormesh ---
+            # --- Plot using pcolormesh with auto-normalization ---
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
             
             mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=colormap,
-                                      shading='auto', alpha=0.8)
+                                      shading='auto', alpha=0.8,
+                                      vmin=vmin_auto_line, vmax=vmax_auto_line)
             
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
@@ -4243,68 +4250,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
