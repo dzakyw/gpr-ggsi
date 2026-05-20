@@ -2905,21 +2905,24 @@ if st.session_state.data_loaded:
             
             # AUTO-NORMALIZATION: symmetric for Raw GPR (like Full View), otherwise use data range percentiles
             if data_type == "Raw GPR":
-                vmax_auto_line = np.percentile(np.abs(display_data), 99)
+                # Use original array's 99th percentile for symmetric scaling (same as Full View)
+                vmax_auto_line = np.percentile(np.abs(st.session_state.original_array), 99)
                 vmin_auto_line = -vmax_auto_line
                 use_log = False
                 norm = None
+                cbar_label = "Amplitude"
+                force_cmap = 'seismic'
             else:
-                # For attributes and resistivity, use percentile based on positive values (or symmetric if negative present)
+                # For Attribute or Resistivity, use their own data ranges
                 if np.any(display_data < 0):
-                    # Use symmetric normalization for bipolar data
                     vmax_auto_line = np.percentile(np.abs(display_data), 99)
                     vmin_auto_line = -vmax_auto_line
                 else:
                     vmin_auto_line = np.percentile(display_data, 1)
                     vmax_auto_line = np.percentile(display_data, 99)
-                use_log = False
-                norm = None
+                cbar_label = data_label
+                force_cmap = colormap   # user-selected colormap
+                
             
             # Colormap selection
             colormap = st.selectbox("Colormap", ["seismic", "viridis", "plasma", "RdBu", "coolwarm"],
@@ -2946,15 +2949,16 @@ if st.session_state.data_loaded:
             # --- Plot using pcolormesh with auto-normalization ---
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
             
-            mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=colormap,
-                                      shading='auto', alpha=1,
-                                      vmin=vmin_auto_line, vmax=vmax_auto_line)
+            mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
+                          shading='auto', alpha=1.0,
+                          vmin=vmin_auto_line, vmax=vmax_auto_line)
+
             
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
             ax_elev.set_title(f'{data_label} – Topographic profile')
             ax_elev.grid(True, alpha=0.2)
-            plt.colorbar(mesh, ax=ax_elev, label=data_label)
+            plt.colorbar(mesh, ax=ax_elev, label=cbar_label)
             
             # Add topographic surface line
             ax_elev.plot(st.session_state.interpolated_coords['distance'],
