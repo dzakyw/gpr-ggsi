@@ -2394,19 +2394,23 @@ if st.session_state.data_loaded:
                          f"{window_data.size:,}")
             
             # Plot windowed data
+            # Plot windowed data
             fig_window, (ax1_window, ax2_window) = plt.subplots(1, 2, figsize=(16, 6))
+            
+            # Use Full View scaling limits (based on original array)
+            vmax_full = np.percentile(np.abs(st.session_state.original_array), 99)
+            vmin_full = -vmax_full
             
             # Windowed original
             im1_window = ax1_window.imshow(window_data_original,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
-                                          aspect='auto', cmap='seismic')
+                                          aspect='auto', cmap='seismic',
+                                          vmin=vmin_full, vmax=vmax_full)
             
             ax1_window.set_xlabel(x_label)
             ax1_window.set_ylabel(y_label)
-            ax1_window.set_title(f"Original Data - Custom Window\n"
-                               f"Depth: {window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}\n"
-                               f"Distance: {window_info['dist_min_val']:.1f}-{window_info['dist_max_val']:.1f} {st.session_state.distance_unit}")
+            ax1_window.set_title(f"Original Data - Custom Window\n...")
             ax1_window.grid(True, alpha=0.3)
             plt.colorbar(im1_window, ax=ax1_window, label='Amplitude')
             
@@ -2414,16 +2418,14 @@ if st.session_state.data_loaded:
             im2_window = ax2_window.imshow(window_data,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
-                                          aspect='auto', cmap='seismic')
+                                          aspect='auto', cmap='seismic',
+                                          vmin=vmin_full, vmax=vmax_full)
             
             ax2_window.set_xlabel(x_label)
             ax2_window.set_ylabel(y_label)
-            ax2_window.set_title(f"Processed Data - Custom Window\n"
-                               f"Depth: {window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}\n"
-                               f"Distance: {window_info['dist_min_val']:.1f}-{window_info['dist_max_val']:.1f} {st.session_state.distance_unit}")
+            ax2_window.set_title(f"Processed Data - Custom Window\n...")
             ax2_window.grid(True, alpha=0.3)
             plt.colorbar(im2_window, ax=ax2_window, label='Amplitude')
-            
             plt.tight_layout()
             st.pyplot(fig_window)
             
