@@ -2947,7 +2947,7 @@ if st.session_state.data_loaded:
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
             
             mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=colormap,
-                                      shading='auto', alpha=0.8,
+                                      shading='auto', alpha=1,
                                       vmin=vmin_auto_line, vmax=vmax_auto_line)
             
             ax_elev.set_xlabel('Distance along profile (m)')
