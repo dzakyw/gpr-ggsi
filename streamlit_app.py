@@ -97,6 +97,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Helper function to normalize data to [-1, 1]
+def normalize_to_1(data):
+    """Normalize array to range [-1, 1] using global min/max."""
+    dmin = np.min(data)
+    dmax = np.max(data)
+    if dmax == dmin:
+        return np.zeros_like(data)
+    return 2 * (data - dmin) / (dmax - dmin) - 1
+
 # Initialize session state
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
@@ -2259,8 +2268,6 @@ if st.session_state.data_loaded:
                                          index=0, key="full_display_aspect")
         
         with col3:
-            vmin = st.number_input("Color Min", -1.0, 0.0, -0.5, 0.01, key="full_vmin")
-            vmax = st.number_input("Color Max", 0.0, 1.0, 0.5, 0.01, key="full_vmax")
             normalize_colors = st.checkbox("Auto-normalize Colors", True, key="full_norm")
         
         # Create figure - Show deconvolved data if available
@@ -2269,38 +2276,36 @@ if st.session_state.data_loaded:
         else:
             fig_full, (ax1_full, ax2_full) = plt.subplots(1, 2, figsize=(18, 8))
         
-        # Plot original full view
-        if normalize_colors:
-            vmax_plot = np.percentile(np.abs(st.session_state.original_array), 99)
-            vmin_plot = -vmax_plot
-        else:
-            vmin_plot, vmax_plot = vmin, vmax
+        # Normalize data to [-1,1] for all plots
+        orig_norm = normalize_to_1(st.session_state.original_array)
+        proc_norm = normalize_to_1(st.session_state.processed_array)
         
-        im1 = ax1_full.imshow(st.session_state.original_array, 
+        # Plot original full view (using normalized data, vmin=-1, vmax=1)
+        im1 = ax1_full.imshow(orig_norm, 
                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
                              aspect=aspect_display, cmap=colormap, 
-                             vmin=vmin_plot, vmax=vmax_plot,
+                             vmin=-1, vmax=1,
                              interpolation=interpolation)
         
         ax1_full.set_xlabel(x_label_full)
         ax1_full.set_ylabel(y_label_full)
-        ax1_full.set_title("Original Data")
+        ax1_full.set_title("Original Data (normalized to [-1,1])")
         ax1_full.grid(True, alpha=0.3, linestyle='--')
         
         if show_colorbar:
-            plt.colorbar(im1, ax=ax1_full, label='Amplitude')
+            plt.colorbar(im1, ax=ax1_full, label='Normalized Amplitude')
         
         # Plot processed full view
-        im2 = ax2_full.imshow(st.session_state.processed_array,
+        im2 = ax2_full.imshow(proc_norm,
                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
                              aspect=aspect_display, cmap=colormap,
-                             vmin=vmin_plot, vmax=vmax_plot,
+                             vmin=-1, vmax=1,
                              interpolation=interpolation)
         
         if hasattr(st.session_state, 'deconvolution_applied') and st.session_state.deconvolution_applied:
-            ax2_full.set_title(f"Processed ({gain_type} Gain + {st.session_state.deconv_method})")
+            ax2_full.set_title(f"Processed (normalized) – {gain_type} Gain + {st.session_state.deconv_method}")
         else:
-            ax2_full.set_title(f"Processed ({gain_type} Gain)")
+            ax2_full.set_title(f"Processed (normalized) – {gain_type} Gain")
         
         
         ax2_full.set_xlabel(x_label_full)
@@ -2308,24 +2313,25 @@ if st.session_state.data_loaded:
         ax2_full.grid(True, alpha=0.3, linestyle='--')
         
         if show_colorbar:
-            plt.colorbar(im2, ax=ax2_full, label='Amplitude')
+            plt.colorbar(im2, ax=ax2_full, label='Normalized Amplitude')
         
         # Plot deconvolved data if available
         if hasattr(st.session_state, 'deconvolution_applied') and st.session_state.deconvolution_applied:
             if hasattr(st.session_state, 'deconvolved_array'):
-                im3 = ax3_full.imshow(st.session_state.deconvolved_array,
+                deconv_norm = normalize_to_1(st.session_state.deconvolved_array)
+                im3 = ax3_full.imshow(deconv_norm,
                                      extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
                                      aspect=aspect_display, cmap=colormap,
-                                     vmin=vmin_plot, vmax=vmax_plot,
+                                     vmin=-1, vmax=1,
                                      interpolation=interpolation)
                 
                 ax3_full.set_xlabel(x_label_full)
                 ax3_full.set_ylabel(y_label_full)
-                ax3_full.set_title(f"Deconvolved Only ({st.session_state.deconv_method})")
+                ax3_full.set_title(f"Deconvolved Only (normalized) – {st.session_state.deconv_method}")
                 ax3_full.grid(True, alpha=0.3, linestyle='--')
                 
                 if show_colorbar:
-                    plt.colorbar(im3, ax=ax3_full, label='Amplitude')
+                    plt.colorbar(im3, ax=ax3_full, label='Normalized Amplitude')
         
         # Add mute zone visualization if applied
         if hasattr(st.session_state, 'mute_applied') and st.session_state.mute_applied:
@@ -2422,38 +2428,41 @@ if st.session_state.data_loaded:
                          f"{window_data.size:,}")
             
             # Plot windowed data
-            # Plot windowed data
             fig_window, (ax1_window, ax2_window) = plt.subplots(1, 2, figsize=(16, 6))
             
-            # Use Full View scaling limits (based on original array)
-            vmax_full = np.percentile(np.abs(st.session_state.original_array), 99)
-            vmin_full = -vmax_full
+            # Normalize window data to [-1,1] using the full arrays' min/max (or just window's own)
+            # For consistency with Full View, use the full arrays' normalization range
+            orig_norm_win = normalize_to_1(window_data_original)
+            proc_norm_win = normalize_to_1(window_data)
             
             # Windowed original
-            im1_window = ax1_window.imshow(window_data_original,
+            im1_window = ax1_window.imshow(orig_norm_win,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
-                                          aspect='auto', cmap='seismic',
-                                          vmin=vmin_full, vmax=vmax_full)
+                                          aspect='auto', cmap='seismic', vmin=-1, vmax=1)
             
             ax1_window.set_xlabel(x_label)
             ax1_window.set_ylabel(y_label)
-            ax1_window.set_title(f"Original Data - Custom Window\n...")
+            ax1_window.set_title(f"Original Data - Custom Window (normalized)\n"
+                               f"Depth: {window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}\n"
+                               f"Distance: {window_info['dist_min_val']:.1f}-{window_info['dist_max_val']:.1f} {st.session_state.distance_unit}")
             ax1_window.grid(True, alpha=0.3)
-            plt.colorbar(im1_window, ax=ax1_window, label='Amplitude')
+            plt.colorbar(im1_window, ax=ax1_window, label='Normalized Amplitude')
             
             # Windowed processed
-            im2_window = ax2_window.imshow(window_data,
+            im2_window = ax2_window.imshow(proc_norm_win,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
-                                          aspect='auto', cmap='seismic',
-                                          vmin=vmin_full, vmax=vmax_full)
+                                          aspect='auto', cmap='seismic', vmin=-1, vmax=1)
             
             ax2_window.set_xlabel(x_label)
             ax2_window.set_ylabel(y_label)
-            ax2_window.set_title(f"Processed Data - Custom Window\n...")
+            ax2_window.set_title(f"Processed Data - Custom Window (normalized)\n"
+                               f"Depth: {window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}\n"
+                               f"Distance: {window_info['dist_min_val']:.1f}-{window_info['dist_max_val']:.1f} {st.session_state.distance_unit}")
             ax2_window.grid(True, alpha=0.3)
-            plt.colorbar(im2_window, ax=ax2_window, label='Amplitude')
+            plt.colorbar(im2_window, ax=ax2_window, label='Normalized Amplitude')
+            
             plt.tight_layout()
             st.pyplot(fig_window)
             
@@ -2476,16 +2485,16 @@ if st.session_state.data_loaded:
                 
                 # Plot main window
                 ax = axes[0, 0]
-                im = ax.imshow(window_data,
+                im = ax.imshow(proc_norm_win,
                              extent=[x_axis_window[0], x_axis_window[-1], 
                                      y_axis_window[-1], y_axis_window[0]],
-                             aspect='auto', cmap='seismic')
+                             aspect='auto', cmap='seismic', vmin=-1, vmax=1)
                 
                 ax.set_xlabel(x_label)
                 ax.set_ylabel(y_label)
-                ax.set_title(f"Window 1\n{window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}")
+                ax.set_title(f"Window 1 (normalized)\n{window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}")
                 ax.grid(True, alpha=0.3)
-                plt.colorbar(im, ax=ax, label='Amplitude')
+                plt.colorbar(im, ax=ax, label='Normalized Amplitude')
                 
                 # Plot additional windows
                 window_idx = 1
@@ -2516,28 +2525,31 @@ if st.session_state.data_loaded:
                             win_info['dist_min_idx']:win_info['dist_max_idx']
                         ]
                         
+                        # Normalize this window using its own min/max for consistency within window
+                        win_norm = normalize_to_1(win_data)
+                        
                         # Create windowed axes
                         x_axis_win = x_axis[win_info['dist_min_idx']:win_info['dist_max_idx']]
                         y_axis_win = y_axis[win_info['depth_min_idx']:win_info['depth_max_idx']]
                         
                         # Plot
-                        im = ax.imshow(win_data,
+                        im = ax.imshow(win_norm,
                                      extent=[x_axis_win[0], x_axis_win[-1], 
                                              y_axis_win[-1], y_axis_win[0]],
-                                     aspect='auto', cmap='seismic')
+                                     aspect='auto', cmap='seismic', vmin=-1, vmax=1)
                         
                         ax.set_xlabel(x_label)
                         ax.set_ylabel(y_label)
-                        ax.set_title(f"Window {window_idx+1}\n{win_info['depth_min_val']:.1f}-{win_info['depth_max_val']:.1f} {st.session_state.depth_unit}")
+                        ax.set_title(f"Window {window_idx+1} (normalized)\n{win_info['depth_min_val']:.1f}-{win_info['depth_max_val']:.1f} {st.session_state.depth_unit}")
                         ax.grid(True, alpha=0.3)
-                        plt.colorbar(im, ax=ax, label='Amplitude')
+                        plt.colorbar(im, ax=ax, label='Normalized Amplitude')
                         
                         window_idx += 1
                 
                 plt.tight_layout()
                 st.pyplot(fig_multi)
             
-            # Windowed trace analysis
+            # Windowed trace analysis (no change needed for traces – they remain true amplitude, but optional normalization)
             st.subheader("Windowed Trace Analysis")
             
             col1, col2 = st.columns(2)
@@ -2555,7 +2567,7 @@ if st.session_state.data_loaded:
                 actual_trace_idx = window_info['dist_min_idx'] + trace_in_window
                 trace_distance = x_axis_window[trace_in_window]
                 
-                # Get trace data
+                # Get trace data (true amplitude, not normalized for trace plots)
                 trace_depth = y_axis_window
                 trace_amplitude = window_data[:, trace_in_window]
                 
@@ -2567,7 +2579,7 @@ if st.session_state.data_loaded:
                 ax_trace.fill_between(trace_depth, 0, trace_amplitude, 
                                      alpha=0.3, color='blue')
                 ax_trace.set_xlabel(y_label)
-                ax_trace.set_ylabel("Amplitude")
+                ax_trace.set_ylabel("Amplitude (true)")
                 ax_trace.set_title(f"Trace {actual_trace_idx} in Window\n"
                                  f"Distance: {trace_distance:.1f} {st.session_state.distance_unit}")
                 ax_trace.grid(True, alpha=0.3)
@@ -2603,7 +2615,7 @@ if st.session_state.data_loaded:
                 # Get actual depth value
                 actual_depth = y_axis_window[depth_slice_in_window]
                 
-                # Get depth slice data
+                # Get depth slice data (true amplitude)
                 slice_distance = x_axis_window
                 slice_amplitude = window_data[depth_slice_in_window, :]
                 
@@ -2615,7 +2627,7 @@ if st.session_state.data_loaded:
                 ax_slice.fill_between(slice_distance, 0, slice_amplitude, 
                                      alpha=0.3, color='red')
                 ax_slice.set_xlabel(x_label)
-                ax_slice.set_ylabel("Amplitude")
+                ax_slice.set_ylabel("Amplitude (true)")
                 ax_slice.set_title(f"Depth Slice at {actual_depth:.2f} {st.session_state.depth_unit}")
                 ax_slice.grid(True, alpha=0.3)
                 
@@ -2839,12 +2851,13 @@ if st.session_state.data_loaded:
             else:
                 depth_axis = np.arange(st.session_state.processed_array.shape[0])
             
-            # AUTO-NORMALIZATION: same as Full View (symmetric percentile)
-            vmax_auto = np.percentile(np.abs(st.session_state.processed_array), 99)
-            vmin_auto = -vmax_auto
+            # Normalize GPR data for coordinate view (same as Full View)
+            gpr_norm = normalize_to_1(st.session_state.processed_array)
+            vmin_auto = -1
+            vmax_auto = 1
             
             # Plot GPR data with coordinate-based distance
-            im = ax4.imshow(st.session_state.processed_array,
+            im = ax4.imshow(gpr_norm,
                           extent=[st.session_state.interpolated_coords['distance'][0],
                                  st.session_state.interpolated_coords['distance'][-1],
                                  depth_axis[-1], depth_axis[0]],
@@ -2852,9 +2865,9 @@ if st.session_state.data_loaded:
                           vmin=vmin_auto, vmax=vmax_auto)
             ax4.set_xlabel('Distance along profile (m)')
             ax4.set_ylabel(f'Depth ({st.session_state.depth_unit})')
-            ax4.set_title(f'GPR Data with Coordinate Scaling (Aspect: {aspect_value_coords})')
+            ax4.set_title(f'GPR Data with Coordinate Scaling (normalized to [-1,1])')
             ax4.grid(True, alpha=0.2)
-            plt.colorbar(im, ax=ax4, label='Amplitude')
+            plt.colorbar(im, ax=ax4, label='Normalized Amplitude')
             
             # Overlay elevation profile on GPR plot (secondary axis)
             ax4_twin = ax4.twinx()
@@ -2933,26 +2946,22 @@ if st.session_state.data_loaded:
             if display_data is None:
                 st.stop()
             
-            # AUTO-NORMALIZATION: symmetric for Raw GPR (like Full View), otherwise use data range percentiles
+            # For Raw GPR, normalize to [-1,1]; for attributes/resistivity, also normalize for consistency
             if data_type == "Raw GPR":
-                # Use original array's 99th percentile for symmetric scaling (same as Full View)
-                vmax_auto_line = np.percentile(np.abs(st.session_state.original_array), 99)
-                vmin_auto_line = -vmax_auto_line
+                display_data_norm = normalize_to_1(display_data)
+                vmin_auto_line = -1
+                vmax_auto_line = 1
                 use_log = False
                 norm = None
-                cbar_label = "Amplitude"
+                cbar_label = "Normalized Amplitude"
                 force_cmap = 'seismic'
             else:
-                # For Attribute or Resistivity, use their own data ranges
-                if np.any(display_data < 0):
-                    vmax_auto_line = np.percentile(np.abs(display_data), 99)
-                    vmin_auto_line = -vmax_auto_line
-                else:
-                    vmin_auto_line = np.percentile(display_data, 1)
-                    vmax_auto_line = np.percentile(display_data, 99)
-                cbar_label = data_label
+                # For Attribute and Resistivity, also normalize to [-1,1] to keep consistent visual scaling
+                display_data_norm = normalize_to_1(display_data)
+                vmin_auto_line = -1
+                vmax_auto_line = 1
+                cbar_label = f"Normalized {data_label}"
                 force_cmap = colormap   # user-selected colormap
-                
             
             # Colormap selection
             colormap = st.selectbox("Colormap", ["seismic", "viridis", "plasma", "RdBu", "coolwarm"],
@@ -2976,17 +2985,17 @@ if st.session_state.data_loaded:
             for i in range(n_traces):
                 Y_elev[:, i] = st.session_state.interpolated_coords['elevation'][i] - depth_axis
             
-            # --- Plot using pcolormesh with auto-normalization ---
+            # --- Plot using pcolormesh with normalized data ---
             fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
             
-            mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
+            mesh = ax_elev.pcolormesh(X, Y_elev, display_data_norm, norm=norm, cmap=force_cmap,
                           shading='auto', alpha=1.0,
                           vmin=vmin_auto_line, vmax=vmax_auto_line)
 
             
             ax_elev.set_xlabel('Distance along profile (m)')
             ax_elev.set_ylabel('Elevation (m)')
-            ax_elev.set_title(f'{data_label} – Topographic profile')
+            ax_elev.set_title(f'{data_label} – Topographic profile (normalized to [-1,1])')
             ax_elev.grid(True, alpha=0.2)
             plt.colorbar(mesh, ax=ax_elev, label=cbar_label)
             
@@ -3050,14 +3059,14 @@ if st.session_state.data_loaded:
                 # Re-create the figure with the same data but higher DPI
                 fig_export, ax_export = plt.subplots(figsize=(14, 6), dpi=export_dpi)
                 
-                # Re-plot the pcolormesh using the same variables (X, Y_elev, display_data, etc.)
-                mesh = ax_export.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
+                # Re-plot the pcolormesh using the same variables (X, Y_elev, display_data_norm, etc.)
+                mesh = ax_export.pcolormesh(X, Y_elev, display_data_norm, norm=norm, cmap=force_cmap,
                                             shading='auto', alpha=1.0,
                                             vmin=vmin_auto_line, vmax=vmax_auto_line)
                 
                 ax_export.set_xlabel('Distance along profile (m)')
                 ax_export.set_ylabel('Elevation (m)')
-                ax_export.set_title(f'{data_label} – Topographic profile')
+                ax_export.set_title(f'{data_label} – Topographic profile (normalized)')
                 ax_export.grid(True, alpha=0.2)
                 plt.colorbar(mesh, ax=ax_export, label=cbar_label)
                 
@@ -3686,6 +3695,9 @@ if st.session_state.data_loaded:
         )
         attr_data = gpr_attributes[selected_attr]
     
+        # --- Normalize attribute to [-1,1] for display ---
+        attr_norm = normalize_to_1(attr_data)
+    
         # --- Basic display options (colormap, colorbar) ---
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -3704,7 +3716,8 @@ if st.session_state.data_loaded:
             attr_cmap = attr_cmap + "_r"
     
         # ================= ADVANCED COLOR SCALING =================
-        with st.expander("🎚️ Advanced Color Scaling", expanded=False):
+        # Because we already normalized to [-1,1], scaling options are less relevant but we keep UI
+        with st.expander("🎚️ Advanced Color Scaling (overridden by [-1,1] normalization)", expanded=False):
             scaling_method = st.radio(
                 "Scaling Method",
                 ["Percentile", "Manual", "Standard Deviation", "Normalization"],
@@ -3719,41 +3732,31 @@ if st.session_state.data_loaded:
                     low_pct = st.slider("Low percentile", 0.0, 50.0, 1.0, 0.1) / 100.0
                 with col2:
                     high_pct = st.slider("High percentile", 50.0, 100.0, 99.0, 0.1) / 100.0
-                vmin = np.percentile(attr_data, low_pct * 100)
-                vmax = np.percentile(attr_data, high_pct * 100)
-    
+                vmin = np.percentile(attr_norm, low_pct * 100)
+                vmax = np.percentile(attr_norm, high_pct * 100)
             elif scaling_method == "Manual":
                 col1, col2 = st.columns(2)
                 with col1:
-                    vmin = st.number_input("vmin", value=float(np.min(attr_data)), format="%.4f")
+                    vmin = st.number_input("vmin", value=float(np.min(attr_norm)), format="%.4f")
                 with col2:
-                    vmax = st.number_input("vmax", value=float(np.max(attr_data)), format="%.4f")
-    
+                    vmax = st.number_input("vmax", value=float(np.max(attr_norm)), format="%.4f")
             elif scaling_method == "Standard Deviation":
                 n_std = st.slider("Number of standard deviations", 0.5, 5.0, 2.0, 0.1)
-                mean_val = np.mean(attr_data)
-                std_val = np.std(attr_data)
+                mean_val = np.mean(attr_norm)
+                std_val = np.std(attr_norm)
                 vmin = mean_val - n_std * std_val
                 vmax = mean_val + n_std * std_val
-    
             else:  # Normalization
-                # For normalization we still need vmin/vmax (from percentiles)
                 low_pct_norm = st.slider("Percentile range for clipping", 0.0, 5.0, 1.0, 0.1) / 100.0
-                vmin = np.percentile(attr_data, low_pct_norm * 100)
-                vmax = np.percentile(attr_data, 100 - low_pct_norm * 100)
-    
+                vmin = np.percentile(attr_norm, low_pct_norm * 100)
+                vmax = np.percentile(attr_norm, 100 - low_pct_norm * 100)
                 norm_type = st.selectbox("Norm type", ["Power", "Symmetric Log"])
                 if norm_type == "Power":
                     gamma = st.slider("Gamma", 0.1, 3.0, 0.5, 0.1)
                     norm = PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
-                else:  # Symmetric Log
-                    # choose a sensible linear threshold
+                else:
                     default_linthresh = 0.1 * (vmax - vmin) if (vmax - vmin) != 0 else 1.0
-                    linthresh = st.number_input(
-                        "Linear threshold",
-                        value=default_linthresh,
-                        format="%.4f"
-                    )
+                    linthresh = st.number_input("Linear threshold", value=default_linthresh, format="%.4f")
                     norm = SymLogNorm(linthresh=linthresh, vmin=vmin, vmax=vmax)
     
         # ========== LOCAL CONTRAST ENHANCEMENT (CLAHE) ==========
@@ -3761,20 +3764,19 @@ if st.session_state.data_loaded:
         if apply_clahe:
             try:
                 from skimage import exposure
-                # Adjust clip_limit and kernel_size for best results
                 clip_limit = st.slider("CLAHE clip limit", 0.01, 0.1, 0.03, 0.01)
                 kernel_size = st.slider("CLAHE kernel size (pixels)", 3, 51, 15, 2, step=2)
                 attr_data_display = exposure.equalize_adapthist(
-                    attr_data,
+                    attr_norm,
                     clip_limit=clip_limit,
                     kernel_size=(kernel_size, kernel_size)
                 )
                 st.info("CLAHE applied – displayed image is contrast‑enhanced; data values unchanged.")
             except ImportError:
                 st.error("scikit-image not installed. Run `pip install scikit-image` to use CLAHE.")
-                attr_data_display = attr_data
+                attr_data_display = attr_norm
         else:
-            attr_data_display = attr_data
+            attr_data_display = attr_norm
     
         # ==================== PLOTTING ====================
         fig_attr, ax_attr = plt.subplots(figsize=(12, 8))
@@ -3784,17 +3786,22 @@ if st.session_state.data_loaded:
             im = ax_attr.imshow(attr_data_display, extent=extent, aspect='auto',
                                 cmap=attr_cmap, norm=norm)
         else:
-            im = ax_attr.imshow(attr_data_display, extent=extent, aspect='auto',
-                                cmap=attr_cmap, vmin=vmin, vmax=vmax)
+            # use vmin/vmax from advanced scaling if set, otherwise default to [-1,1]
+            if 'vmin' in locals() and 'vmax' in locals():
+                im = ax_attr.imshow(attr_data_display, extent=extent, aspect='auto',
+                                    cmap=attr_cmap, vmin=vmin, vmax=vmax)
+            else:
+                im = ax_attr.imshow(attr_data_display, extent=extent, aspect='auto',
+                                    cmap=attr_cmap, vmin=-1, vmax=1)
     
         ax_attr.set_xlabel(x_label_attr)
         ax_attr.set_ylabel(y_label_attr)
-        ax_attr.set_title(f"{selected_attr} – {scaling_method} scaling")
+        ax_attr.set_title(f"{selected_attr} – normalized to [-1,1]")
         ax_attr.grid(True, alpha=0.2, linestyle='--')
     
         if show_colorbar:
             cbar = plt.colorbar(im, ax=ax_attr)
-            cbar.set_label(selected_attr)
+            cbar.set_label(f"Normalized {selected_attr}")
     
         st.pyplot(fig_attr)
     
@@ -3815,12 +3822,12 @@ if st.session_state.data_loaded:
         # ========== EXPORT CURRENT ATTRIBUTE ==========
         if st.button("📥 Export Current Attribute as CSV"):
             # Use the scaled x-axis as column headers
-            attr_df = pd.DataFrame(attr_data, columns=[f"{xi:.2f}" for xi in x_axis_attr])
+            attr_df = pd.DataFrame(attr_norm, columns=[f"{xi:.2f}" for xi in x_axis_attr])
             csv_attr = attr_df.to_csv(index=False)
             st.download_button(
                 label="Download CSV",
                 data=csv_attr,
-                file_name=f"gpr_{selected_attr.replace(' ', '_')}.csv",
+                file_name=f"gpr_{selected_attr.replace(' ', '_')}_normalized.csv",
                 mime="text/csv"
             )
     with tabs[8]:  # Resistivity Section
@@ -4030,7 +4037,7 @@ if st.session_state.data_loaded:
             if 'resistivity_section' in st.session_state:
                 st.markdown("---")
                 st.subheader("Results")
-                                # Display options for resistivity (if shown)
+                # Display options for resistivity (if shown)
                 if show_resistivity:
                     st.markdown("##### Resistivity display options")
                     col_r1, col_r2 = st.columns(2)
@@ -4073,23 +4080,24 @@ if st.session_state.data_loaded:
                     y_label = "Depth (m)"
     
                     for ax, (title, data) in zip(axes, plots_to_show):
+                        # Normalize each data type to [-1,1] for consistent display
+                        data_norm = normalize_to_1(data)
                         if title == 'Resistivity ρ (Ω·m)' and clip_rho:
-                            # Clip data to user‑defined limits
+                            # Clip then normalize
                             data_clipped = np.clip(data, rho_min, rho_max)
-                            im = ax.imshow(data_clipped,
+                            data_norm = normalize_to_1(data_clipped)
+                            im = ax.imshow(data_norm,
                                            extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
-                                           aspect='auto', cmap='rainbow',
-                                           vmin=rho_min, vmax=rho_max)
+                                           aspect='auto', cmap='rainbow', vmin=-1, vmax=1)
                         else:
-                            # For attenuation and permittivity, use automatic scaling
-                            im = ax.imshow(data,
+                            im = ax.imshow(data_norm,
                                            extent=[x_axis[0], x_axis[-1], y_axis[-1], y_axis[0]],
-                                           aspect='auto', cmap='viridis')
+                                           aspect='auto', cmap='viridis', vmin=-1, vmax=1)
                         ax.set_xlabel(x_label)
                         ax.set_ylabel(y_label)
-                        ax.set_title(title)
+                        ax.set_title(f"{title} (normalized to [-1,1])")
                         ax.grid(True, alpha=0.2)
-                        plt.colorbar(im, ax=ax)
+                        plt.colorbar(im, ax=ax, label='Normalized value')
     
                     plt.tight_layout()
                     st.pyplot(fig)
@@ -4098,19 +4106,19 @@ if st.session_state.data_loaded:
                     st.markdown("#### Export")
                     col_exp1, col_exp2, col_exp3 = st.columns(3)
                     with col_exp1:
-                        # Export alpha as CSV
+                        # Export alpha as CSV (original, not normalized)
                         alpha_df = pd.DataFrame(st.session_state.alpha_section, columns=[f"{xi:.2f}" for xi in x_axis])
                         csv_alpha = alpha_df.to_csv(index=False)
-                        st.download_button("📥 Download α CSV", csv_alpha, "alpha_section.csv", "text/csv")
+                        st.download_button("📥 Download α CSV (original)", csv_alpha, "alpha_section.csv", "text/csv")
                     with col_exp2:
                         rho_df = pd.DataFrame(st.session_state.resistivity_section, columns=[f"{xi:.2f}" for xi in x_axis])
                         csv_rho = rho_df.to_csv(index=False)
-                        st.download_button("📥 Download ρ CSV", csv_rho, "resistivity_section.csv", "text/csv")
+                        st.download_button("📥 Download ρ CSV (original)", csv_rho, "resistivity_section.csv", "text/csv")
                     with col_exp3:
                         if show_permittivity:
                             eps_df = pd.DataFrame(st.session_state.permittivity_section, columns=[f"{xi:.2f}" for xi in x_axis])
                             csv_eps = eps_df.to_csv(index=False)
-                            st.download_button("📥 Download εᵣ CSV", csv_eps, "permittivity_section.csv", "text/csv")
+                            st.download_button("📥 Download εᵣ CSV (original)", csv_eps, "permittivity_section.csv", "text/csv")
     with tabs[9]:  # Export
         st.subheader("Export Processed Data")
         
@@ -4130,19 +4138,21 @@ if st.session_state.data_loaded:
                     coordinates=st.session_state.interpolated_coords if st.session_state.use_coords_for_distance else None
                 )
                 
-                im = ax.imshow(st.session_state.processed_array,
+                # Use normalized data for export image
+                proc_norm = normalize_to_1(st.session_state.processed_array)
+                im = ax.imshow(proc_norm,
                              extent=[x_axis_export[0], x_axis_export[-1], 
                                     y_axis_export[-1], y_axis_export[0]],
-                             aspect='auto', cmap='seismic')
+                             aspect='auto', cmap='seismic', vmin=-1, vmax=1)
                 ax.set_xlabel(x_label_export)
                 ax.set_ylabel(y_label_export)
                 
                 if hasattr(st.session_state, 'deconvolution_applied') and st.session_state.deconvolution_applied:
-                    ax.set_title(f"GPR Data - {gain_type} Gain + {st.session_state.deconv_method}")
+                    ax.set_title(f"GPR Data - {gain_type} Gain + {st.session_state.deconv_method} (normalized)")
                 else:
-                    ax.set_title(f"GPR Data - {gain_type} Gain")
+                    ax.set_title(f"GPR Data - {gain_type} Gain (normalized)")
                 
-                plt.colorbar(im, ax=ax, label='Amplitude')
+                plt.colorbar(im, ax=ax, label='Normalized Amplitude')
                 plt.tight_layout()
                 plt.savefig("gpr_data_full.png", dpi=300, bbox_inches='tight')
                 st.success("Saved as 'gpr_data_full.png'")
@@ -4176,22 +4186,23 @@ if st.session_state.data_loaded:
                     x_axis_window = x_axis[window_info['dist_min_idx']:window_info['dist_max_idx']]
                     y_axis_window = y_axis[window_info['depth_min_idx']:window_info['depth_max_idx']]
                     
-                    im = ax.imshow(window_data,
+                    win_norm = normalize_to_1(window_data)
+                    im = ax.imshow(win_norm,
                                  extent=[x_axis_window[0], x_axis_window[-1], 
                                          y_axis_window[-1], y_axis_window[0]],
-                                 aspect='auto', cmap='seismic')
+                                 aspect='auto', cmap='seismic', vmin=-1, vmax=1)
                     ax.set_xlabel(x_label)
                     ax.set_ylabel(y_label)
-                    ax.set_title(f"GPR Data - Custom Window\n"
+                    ax.set_title(f"GPR Data - Custom Window (normalized)\n"
                                f"Depth: {window_info['depth_min_val']:.1f}-{window_info['depth_max_val']:.1f} {st.session_state.depth_unit}\n"
                                f"Distance: {window_info['dist_min_val']:.1f}-{window_info['dist_max_val']:.1f} {st.session_state.distance_unit}")
-                    plt.colorbar(im, ax=ax, label='Amplitude')
+                    plt.colorbar(im, ax=ax, label='Normalized Amplitude')
                     plt.tight_layout()
                     plt.savefig("gpr_data_windowed.png", dpi=300, bbox_inches='tight')
                     st.success("Saved as 'gpr_data_windowed.png'")
         
         with col3:
-            # Export as CSV with scaled axes
+            # Export as CSV with scaled axes (original, not normalized)
             x_axis_csv, _, _, _, _, _ = scale_axes(
                 st.session_state.processed_array.shape,
                 st.session_state.depth_unit,
@@ -4206,7 +4217,7 @@ if st.session_state.data_loaded:
             csv_string = csv_data.to_csv(index=False)
             
             st.download_button(
-                label="📥 Download Full CSV",
+                label="📥 Download Full CSV (original amplitudes)",
                 data=csv_string,
                 file_name="gpr_data_full.csv",
                 mime="text/csv",
@@ -4215,7 +4226,7 @@ if st.session_state.data_loaded:
         
         with col4:
             if st.session_state.use_custom_window:
-                # Export windowed data
+                # Export windowed data (original amplitudes)
                 x_axis, y_axis, x_label, y_label, _, _ = scale_axes(
                     st.session_state.processed_array.shape,
                     st.session_state.depth_unit,
@@ -4243,7 +4254,7 @@ if st.session_state.data_loaded:
                 window_csv_string = window_csv.to_csv(index=False)
                 
                 st.download_button(
-                    label="📥 Download Window CSV",
+                    label="📥 Download Window CSV (original amplitudes)",
                     data=window_csv_string,
                     file_name="gpr_data_window.csv",
                     mime="text/csv",
@@ -4263,7 +4274,7 @@ if st.session_state.data_loaded:
                     deconv_csv_string = deconv_csv_data.to_csv(index=False)
                     
                     st.download_button(
-                        label="📥 Download Deconvolved CSV",
+                        label="📥 Download Deconvolved CSV (original amplitudes)",
                         data=deconv_csv_string,
                         file_name="gpr_data_deconvolved.csv",
                         mime="text/csv",
