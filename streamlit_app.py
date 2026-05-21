@@ -641,6 +641,10 @@ with st.sidebar:
             freq_min = st.number_input("Min Freq (MHz)", 10, 500, 60)
         with col2:
             freq_max = st.number_input("Max Freq (MHz)", 10, 1000, 130)
+    st.markdown("---")
+    st.header("📸 High‑Resolution Export")
+    export_dpi = st.number_input("Export DPI", min_value=72, max_value=1200, value=300, step=50)
+    export_format = st.selectbox("File format", ["PNG", "PDF", "SVG"], index=0)
     
     process_btn = st.button("🚀 Process Data", type="primary", use_container_width=True)
 
@@ -3040,6 +3044,81 @@ if st.session_state.data_loaded:
             ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
             plt.tight_layout()
             st.pyplot(fig_elev)
+
+            # ========== HIGH-RESOLUTION EXPORT BUTTON ==========
+            if st.button("📷 Save current view as high‑resolution file", key="export_coord"):
+                # Re-create the figure with the same data but higher DPI
+                fig_export, ax_export = plt.subplots(figsize=(14, 6), dpi=export_dpi)
+                
+                # Re-plot the pcolormesh using the same variables (X, Y_elev, display_data, etc.)
+                mesh = ax_export.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
+                                            shading='auto', alpha=1.0,
+                                            vmin=vmin_auto_line, vmax=vmax_auto_line)
+                
+                ax_export.set_xlabel('Distance along profile (m)')
+                ax_export.set_ylabel('Elevation (m)')
+                ax_export.set_title(f'{data_label} – Topographic profile')
+                ax_export.grid(True, alpha=0.2)
+                plt.colorbar(mesh, ax=ax_export, label=cbar_label)
+                
+                # Add surface line and poles (copy exactly as in the original plot)
+                ax_export.plot(st.session_state.interpolated_coords['distance'],
+                               st.session_state.interpolated_coords['elevation'],
+                               'k-', linewidth=1.5, alpha=0.8, label='Surface')
+                ax_export.fill_between(st.session_state.interpolated_coords['distance'],
+                                       Y_elev.min(), st.session_state.interpolated_coords['elevation'],
+                                       alpha=0.1, color='gray')
+                
+                if pole_data is not None:
+                    from scipy.interpolate import interp1d
+                    elev_interp = interp1d(st.session_state.interpolated_coords['distance'],
+                                           st.session_state.interpolated_coords['elevation'],
+                                           kind='linear', fill_value='extrapolate')
+                    for i in range(len(pole_data['projected_distances'])):
+                        pole_elev = elev_interp(pole_data['projected_distances'][i])
+                        if 'TS' in str(pole_data['names'][i]):
+                            color = 'red'
+                            marker = '^'
+                        elif 'TL' in str(pole_data['names'][i]):
+                            color = 'purple'
+                            marker = '^'
+                        else:
+                            color = 'orange'
+                            marker = 'o'
+                        ax_export.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
+                                          c=color, marker=marker, s=100, alpha=0.9, zorder=10)
+                        ax_export.text(pole_data['projected_distances'][i], pole_elev + 1,
+                                       pole_data['names'][i], fontsize=8, ha='center')
+                
+                ax_export.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
+                ax_export.legend(loc='upper right')
+                
+                # Save to a bytes buffer
+                import io
+                buf = io.BytesIO()
+                if export_format == "PNG":
+                    plt.savefig(buf, format='png', dpi=export_dpi, bbox_inches='tight')
+                    mime = "image/png"
+                    ext = "png"
+                elif export_format == "PDF":
+                    plt.savefig(buf, format='pdf', bbox_inches='tight')
+                    mime = "application/pdf"
+                    ext = "pdf"
+                else:  # SVG
+                    plt.savefig(buf, format='svg', bbox_inches='tight')
+                    mime = "image/svg+xml"
+                    ext = "svg"
+                buf.seek(0)
+                
+                st.download_button(
+                    label=f"📥 Download {export_format} file",
+                    data=buf,
+                    file_name=f"gpr_topographic_profile.{ext}",
+                    mime=mime,
+                    use_container_width=True
+                )
+                plt.close(fig_export)
+                st.success(f"High‑resolution figure ready (DPI={export_dpi})")
             # Display pole information table
             if pole_data is not None:
                 st.subheader("Electric Pole Information")
