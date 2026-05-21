@@ -618,6 +618,15 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("⚙️ Advanced Processing")
+    st.markdown("---")
+    st.header("📉 Vertical Noise Reduction")
+    apply_vertical_filter = st.checkbox("Apply Vertical Noise Filter", False)
+    if apply_vertical_filter:
+        filter_type = st.selectbox("Filter Type", ["Median Filter", "Moving Average", "Gaussian Smoothing"])
+        window_traces = st.slider("Filter Window (traces)", 3, 51, 5, step=2, 
+                                  help="Number of neighboring traces to average/median")
+        if filter_type == "Median Filter":
+            preserve_edges = st.checkbox("Preserve Edges (reflect padding)", True)
     
     bgr = st.checkbox("Apply Background Removal", False)
     if bgr:
@@ -1890,7 +1899,22 @@ if dzt_file and process_btn:
                         st.session_state.mute_applied = False
                         st.session_state.mute_mask = None
                         st.session_state.mute_zones = None
-                    
+                    # ========== VERTICAL NOISE REDUCTION (trace-to-trace filter) ==========
+                    if apply_vertical_filter:
+                        from scipy.ndimage import median_filter, uniform_filter1d, gaussian_filter1d
+                        n_samples, n_traces = original_array.shape
+                        st.info(f"Applying {filter_type} with window {window_traces} traces...")
+                        
+                        if filter_type == "Median Filter":
+                            # Median across traces (axis=1) – kills spike noise
+                            original_array = median_filter(original_array, size=(1, window_traces), mode='reflect' if preserve_edges else 'nearest')
+                        elif filter_type == "Moving Average":
+                            original_array = uniform_filter1d(original_array, size=window_traces, axis=1, mode='reflect')
+                        elif filter_type == "Gaussian Smoothing":
+                            sigma = window_traces / 3.0
+                            original_array = gaussian_filter1d(original_array, sigma=sigma, axis=1, mode='reflect')
+                        
+                        st.success(f"✓ Vertical noise reduced using {filter_type}")
                     # Apply near-surface correction if requested
                     if apply_near_surface_correction:
                         # Store correction parameters
