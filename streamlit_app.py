@@ -2938,8 +2938,10 @@ if st.session_state.data_loaded:
             
             # AUTO-NORMALIZATION: symmetric for Raw GPR (like Full View), otherwise use data range percentiles
             if data_type == "Raw GPR":
-                # Use original array's 99th percentile for symmetric scaling (same as Full View)
-                vmax_auto_line = np.percentile(np.abs(st.session_state.original_array), 99)
+                # FIX: scale to the PROCESSED data actually displayed (AGC output ~ +/-1,
+                # not the original amplitude range)
+                vmax_auto_line = np.percentile(np.abs(display_data), 99)
+                vmax_auto_line = vmax_auto_line if vmax_auto_line > 0 else 1.0
                 vmin_auto_line = -vmax_auto_line
                 use_log = False
                 norm = None
