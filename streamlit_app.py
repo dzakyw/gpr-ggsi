@@ -1033,26 +1033,13 @@ def apply_gain(array, gain_type, **kwargs):
         window = kwargs.get('window_size', 100)
         target = kwargs.get('target_amplitude', 0.3)
         
-        result = np.zeros_like(array)
-        half_window = window // 2
-        
-        for i in range(n_traces):
-            trace = array[:, i]
-            agc_trace = np.zeros(n_samples)
-            
-            for j in range(n_samples):
-                start = max(0, j - half_window)
-                end = min(n_samples, j + half_window + 1)
-                
-                window_data = trace[start:end]
-                rms = np.sqrt(np.mean(window_data**2))
-                
-                if rms > 0:
-                    agc_trace[j] = trace[j] * (target / rms)
-                else:
-                    agc_trace[j] = trace[j]
-            
-            result[:, i] = agc_trace
+        # Vectorized sliding-window RMS along the time axis (axis=0)
+        from scipy.ndimage import uniform_filter1d
+        arr = array.astype(np.float64)
+        mean_sq = uniform_filter1d(arr**2, size=window, axis=0, mode='nearest')
+        rms = np.sqrt(mean_sq)
+        eps = np.finfo(np.float64).eps
+        result = np.where(rms > eps, arr * (target / np.maximum(rms, eps)), arr)
         
         return result
     
@@ -2291,10 +2278,18 @@ if st.session_state.data_loaded:
             plt.colorbar(im1, ax=ax1_full, label='Amplitude')
         
         # Plot processed full view
+        # FIX: AGC output has amplitude ~ target (0.1-1.0), far smaller than the
+        # original data range. Scale this panel to ITS OWN amplitudes.
+        if normalize_colors:
+            vmax_proc = np.percentile(np.abs(st.session_state.processed_array), 99)
+            vmax_proc = vmax_proc if vmax_proc > 0 else 1.0
+            vmin_proc = -vmax_proc
+        else:
+            vmin_proc, vmax_proc = vmin, vmax
         im2 = ax2_full.imshow(st.session_state.processed_array,
                              extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
                              aspect=aspect_display, cmap=colormap,
-                             vmin=vmin_plot, vmax=vmax_plot,
+                             vmin=vmin_proc, vmax=vmax_proc,
                              interpolation=interpolation)
         
         if hasattr(st.session_state, 'deconvolution_applied') and st.session_state.deconvolution_applied:
@@ -2313,10 +2308,16 @@ if st.session_state.data_loaded:
         # Plot deconvolved data if available
         if hasattr(st.session_state, 'deconvolution_applied') and st.session_state.deconvolution_applied:
             if hasattr(st.session_state, 'deconvolved_array'):
+                if normalize_colors:
+                    vmax_dec = np.percentile(np.abs(st.session_state.deconvolved_array), 99)
+                    vmax_dec = vmax_dec if vmax_dec > 0 else 1.0
+                    vmin_dec = -vmax_dec
+                else:
+                    vmin_dec, vmax_dec = vmin, vmax
                 im3 = ax3_full.imshow(st.session_state.deconvolved_array,
                                      extent=[x_axis_full[0], x_axis_full[-1], y_axis_full[-1], y_axis_full[0]],
                                      aspect=aspect_display, cmap=colormap,
-                                     vmin=vmin_plot, vmax=vmax_plot,
+                                     vmin=vmin_dec, vmax=vmax_dec,
                                      interpolation=interpolation)
                 
                 ax3_full.set_xlabel(x_label_full)
@@ -2442,12 +2443,14 @@ if st.session_state.data_loaded:
             ax1_window.grid(True, alpha=0.3)
             plt.colorbar(im1_window, ax=ax1_window, label='Amplitude')
             
-            # Windowed processed
+            # Windowed processed (FIX: scale to processed amplitudes, not original)
+            vmax_full_proc = np.percentile(np.abs(window_data), 99)
+            vmax_full_proc = vmax_full_proc if vmax_full_proc > 0 else 1.0
             im2_window = ax2_window.imshow(window_data,
                                           extent=[x_axis_window[0], x_axis_window[-1], 
                                                   y_axis_window[-1], y_axis_window[0]],
                                           aspect='auto', cmap='seismic',
-                                          vmin=vmin_full, vmax=vmax_full)
+                                          vmin=-vmax_full_proc, vmax=vmax_full_proc)
             
             ax2_window.set_xlabel(x_label)
             ax2_window.set_ylabel(y_label)
