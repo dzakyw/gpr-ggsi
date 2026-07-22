@@ -2359,6 +2359,7 @@ if st.session_state.data_loaded:
         
         plt.tight_layout()
         st.pyplot(fig_full)
+        plt.close(fig_full)
         
         # Display aspect ratio info
         st.info(f"**Aspect Ratio:** {aspect_value} | **Plot Dimensions:** {st.session_state.processed_array.shape[1]} × {st.session_state.processed_array.shape[0]} | **Y:X Scale:** {y_axis_full[-1]/x_axis_full[-1]:.3f}")
@@ -2459,6 +2460,7 @@ if st.session_state.data_loaded:
             plt.colorbar(im2_window, ax=ax2_window, label='Amplitude')
             plt.tight_layout()
             st.pyplot(fig_window)
+            plt.close(fig_window)
             
             # Multiple windows view
             if st.session_state.multiple_windows and hasattr(st.session_state, 'additional_windows'):
@@ -2539,6 +2541,7 @@ if st.session_state.data_loaded:
                 
                 plt.tight_layout()
                 st.pyplot(fig_multi)
+                plt.close(fig_multi)
             
             # Windowed trace analysis
             st.subheader("Windowed Trace Analysis")
@@ -2577,6 +2580,7 @@ if st.session_state.data_loaded:
                 ax_trace.invert_xaxis()  # Depth increases downward
                 
                 st.pyplot(fig_trace)
+                plt.close(fig_trace)
                 
                 # SIMPLE DOWNLOAD TRACE DATA
                 trace_df = pd.DataFrame({
@@ -2623,6 +2627,7 @@ if st.session_state.data_loaded:
                 ax_slice.grid(True, alpha=0.3)
                 
                 st.pyplot(fig_slice)
+                plt.close(fig_slice)
                 
                 # SIMPLE DOWNLOAD DEPTH SLICE DATA
                 slice_df = pd.DataFrame({
@@ -2869,6 +2874,7 @@ if st.session_state.data_loaded:
             
             plt.tight_layout()
             st.pyplot(fig_coords)
+            plt.close(fig_coords)
             
             # ELECTRIC POLE ANOMALY COMPARISON PLOT
             # =============================================================================
@@ -2962,6 +2968,20 @@ if st.session_state.data_loaded:
             # Colormap selection
             colormap = st.selectbox("Colormap", ["seismic", "viridis", "plasma", "RdBu", "coolwarm"],
                                     index=0 if default_cmap == "seismic" else 1)
+
+            # --- Aspect / vertical-exaggeration control ---
+            col_ve1, col_ve2 = st.columns(2)
+            with col_ve1:
+                true_scale = st.checkbox(
+                    "True scale (1:1 depth vs distance)", value=True, key="coord_true_scale",
+                    help="Keep 1 m vertical = 1 m horizontal so short profiles are not stretched."
+                )
+            with col_ve2:
+                vert_exag = st.number_input(
+                    "Vertical exaggeration", min_value=0.1, max_value=20.0,
+                    value=1.0, step=0.5, key="coord_vert_exag",
+                    help="1.0 = true scale. >1 stretches depth to reveal thin layers."
+                )
             
             # --- Prepare elevation‑adjusted coordinates ---
             n_traces = st.session_state.processed_array.shape[1]
@@ -2981,12 +3001,27 @@ if st.session_state.data_loaded:
             for i in range(n_traces):
                 Y_elev[:, i] = st.session_state.interpolated_coords['elevation'][i] - depth_axis
             
+            # --- Figure sizing so the data aspect is preserved (no stretching) ---
+            _dist = st.session_state.interpolated_coords['distance']
+            _elev = st.session_state.interpolated_coords['elevation']
+            x_range = float(np.ptp(_dist)) if np.ptp(_dist) > 0 else 1.0
+            y_range = float(_elev.max() + 5 - Y_elev.min())
+            y_range = y_range if y_range > 0 else 1.0
+            # aspect passed to matplotlib: data-y unit / data-x unit in display space
+            aspect_ratio = vert_exag if not true_scale else 1.0
+            # Pick a figure size that roughly matches the true proportions
+            base_w = 14.0
+            fig_h = base_w * (y_range * aspect_ratio) / x_range + 1.5  # +margin for title/labels
+            fig_h = float(np.clip(fig_h, 3.0, 30.0))
+
             # --- Plot using pcolormesh with auto-normalization ---
-            fig_elev, ax_elev = plt.subplots(figsize=(14, 6))
+            fig_elev, ax_elev = plt.subplots(figsize=(base_w, fig_h))
             
             mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
                           shading='auto', alpha=1.0,
                           vmin=vmin_auto_line, vmax=vmax_auto_line)
+            # Enforce true 1:1 (or chosen exaggeration) between depth and distance
+            ax_elev.set_aspect(aspect_ratio, adjustable='box')
 
             
             ax_elev.set_xlabel('Distance along profile (m)')
@@ -3018,7 +3053,7 @@ if st.session_state.data_loaded:
                         marker = '^'
                         label = 'TS Pole'
                     elif 'TL' in str(pole_data['names'][i]):
-                        color = 'green'
+                        color = 'purple'
                         marker = '^'
                         label = 'TL Pole'
                     else:
@@ -3049,16 +3084,18 @@ if st.session_state.data_loaded:
             ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
             plt.tight_layout()
             st.pyplot(fig_elev)
+            plt.close(fig_elev)
 
             # ========== HIGH-RESOLUTION EXPORT BUTTON ==========
             if st.button("📷 Save current view as high‑resolution file", key="export_coord"):
                 # Re-create the figure with the same data but higher DPI
-                fig_export, ax_export = plt.subplots(figsize=(14, 6), dpi=export_dpi)
+                fig_export, ax_export = plt.subplots(figsize=(base_w, fig_h), dpi=export_dpi)
                 
                 # Re-plot the pcolormesh using the same variables (X, Y_elev, display_data, etc.)
                 mesh = ax_export.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
                                             shading='auto', alpha=1.0,
                                             vmin=vmin_auto_line, vmax=vmax_auto_line)
+                ax_export.set_aspect(aspect_ratio, adjustable='box')
                 
                 ax_export.set_xlabel('Distance along profile (m)')
                 ax_export.set_ylabel('Elevation (m)')
@@ -3282,6 +3319,7 @@ if st.session_state.data_loaded:
             
             plt.tight_layout()
             st.pyplot(fig_fft)
+            plt.close(fig_fft)
             
             # FFT statistics
             st.subheader("FFT Statistics")
@@ -3493,6 +3531,7 @@ if st.session_state.data_loaded:
         ax_gain.invert_yaxis()  # Depth increases downward
         
         st.pyplot(fig_gain)
+        plt.close(fig_gain)
         
         # Show statistics
         col1, col2, col3 = st.columns(3)
@@ -3540,6 +3579,7 @@ if st.session_state.data_loaded:
                     
                     plt.tight_layout()
                     st.pyplot(fig_wavelet)
+                    plt.close(fig_wavelet)
                     
                     # Wavelet statistics
                     st.markdown("#### Wavelet Statistics")
@@ -3593,6 +3633,7 @@ if st.session_state.data_loaded:
                 ax_trace.grid(True, alpha=0.3)
                 
                 st.pyplot(fig_trace)
+                plt.close(fig_trace)
             
             # Deconvolution residual analysis
             st.markdown("### Residual Analysis")
@@ -3623,6 +3664,7 @@ if st.session_state.data_loaded:
                     ax_res.grid(True, alpha=0.3)
                     
                     st.pyplot(fig_res)
+                    plt.close(fig_res)
                 
                 with col_res2:
                     # Residual histogram
@@ -3648,6 +3690,7 @@ if st.session_state.data_loaded:
                     ax_hist.legend()
                     
                     st.pyplot(fig_hist)
+                    plt.close(fig_hist)
                     
                     # Display residual statistics
                     st.metric("Mean Residual", f"{np.mean(flat_residual):.3e}")
@@ -3802,6 +3845,7 @@ if st.session_state.data_loaded:
             cbar.set_label(selected_attr)
     
         st.pyplot(fig_attr)
+        plt.close(fig_attr)
     
         # ========== INTERPRETATION GUIDE ==========
         st.markdown("#### 🧠 Interpretation Guide")
@@ -4098,6 +4142,7 @@ if st.session_state.data_loaded:
     
                     plt.tight_layout()
                     st.pyplot(fig)
+                    plt.close(fig)
     
                     # Export options
                     st.markdown("#### Export")
