@@ -2982,6 +2982,12 @@ if st.session_state.data_loaded:
                     value=1.0, step=0.5, key="coord_vert_exag",
                     help="1.0 = true scale. >1 stretches depth to reveal thin layers."
                 )
+            fig_width_in = st.slider(
+                "Figure width (in)", min_value=8.0, max_value=24.0, value=14.0, step=1.0,
+                key="coord_fig_width",
+                help="Overall canvas width. At true scale the height follows the data, "
+                     "so use this to keep a consistent, comfortable section size."
+            )
             
             # --- Prepare elevation‑adjusted coordinates ---
             n_traces = st.session_state.processed_array.shape[1]
@@ -3009,13 +3015,14 @@ if st.session_state.data_loaded:
             y_range = y_range if y_range > 0 else 1.0
             # aspect passed to matplotlib: data-y unit / data-x unit in display space
             aspect_ratio = vert_exag if not true_scale else 1.0
-            # Pick a figure size that roughly matches the true proportions
-            base_w = 14.0
-            fig_h = base_w * (y_range * aspect_ratio) / x_range + 1.5  # +margin for title/labels
-            fig_h = float(np.clip(fig_h, 3.0, 30.0))
+            # Figure size follows the true data proportions at the chosen width.
+            # Height is clamped so very flat sections stay readable without distortion.
+            base_w = float(fig_width_in)
+            fig_h = base_w * (y_range * aspect_ratio) / x_range
+            fig_h = float(np.clip(fig_h, 2.5, 22.0))
 
             # --- Plot using pcolormesh with auto-normalization ---
-            fig_elev, ax_elev = plt.subplots(figsize=(base_w, fig_h))
+            fig_elev, ax_elev = plt.subplots(figsize=(base_w, fig_h), constrained_layout=True)
             
             mesh = ax_elev.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
                           shading='auto', alpha=1.0,
@@ -3028,7 +3035,9 @@ if st.session_state.data_loaded:
             ax_elev.set_ylabel('Elevation (m)')
             ax_elev.set_title(f'{data_label} – Topographic profile')
             ax_elev.grid(True, alpha=0.2)
-            plt.colorbar(mesh, ax=ax_elev, label=cbar_label)
+            # Colorbar height tracks the plot height and stays thin so it never dominates
+            cbar = fig_elev.colorbar(mesh, ax=ax_elev, label=cbar_label,
+                                     fraction=0.025, pad=0.02, aspect=30)
             
             # Add topographic surface line
             ax_elev.plot(st.session_state.interpolated_coords['distance'],
@@ -3082,14 +3091,14 @@ if st.session_state.data_loaded:
                 ax_elev.legend(handles=legend_elements, loc='upper right')
             
             ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
-            plt.tight_layout()
             st.pyplot(fig_elev)
             plt.close(fig_elev)
 
             # ========== HIGH-RESOLUTION EXPORT BUTTON ==========
             if st.button("📷 Save current view as high‑resolution file", key="export_coord"):
                 # Re-create the figure with the same data but higher DPI
-                fig_export, ax_export = plt.subplots(figsize=(base_w, fig_h), dpi=export_dpi)
+                fig_export, ax_export = plt.subplots(figsize=(base_w, fig_h), dpi=export_dpi,
+                                                      constrained_layout=True)
                 
                 # Re-plot the pcolormesh using the same variables (X, Y_elev, display_data, etc.)
                 mesh = ax_export.pcolormesh(X, Y_elev, display_data, norm=norm, cmap=force_cmap,
@@ -3101,7 +3110,8 @@ if st.session_state.data_loaded:
                 ax_export.set_ylabel('Elevation (m)')
                 ax_export.set_title(f'{data_label} – Topographic profile')
                 ax_export.grid(True, alpha=0.2)
-                plt.colorbar(mesh, ax=ax_export, label=cbar_label)
+                fig_export.colorbar(mesh, ax=ax_export, label=cbar_label,
+                                    fraction=0.025, pad=0.02, aspect=30)
                 
                 # Add surface line and poles (copy exactly as in the original plot)
                 ax_export.plot(st.session_state.interpolated_coords['distance'],
