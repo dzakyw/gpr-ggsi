@@ -609,8 +609,17 @@ with st.sidebar:
         exp_factor = st.slider("Exponential Factor", 0.1, 5.0, 1.5, 0.1)
     
     elif gain_type == "AGC (Automatic Gain Control)":
-        window_size = st.slider("AGC Window (samples)", 10, 500, 100)
+        agc_method = st.selectbox(
+            "AGC Method", ["Robust (median)", "Standard (RMS)"], index=0,
+            help="Robust ignores isolated strong events (direct/first-arrival), removing "
+                 "the white 'halo' band under strong shallow reflectors. RMS is classic AGC."
+        )
+        window_size = st.slider("AGC Window (samples)", 10, 500, 100,
+            help="Smaller window = more local gain and a thinner halo. Try 30-60 if you see whitening.")
         target_amplitude = st.slider("Target Amplitude", 0.1, 1.0, 0.3, 0.05)
+        agc_max_gain = st.slider("Max Gain (x median level)", 2.0, 100.0, 20.0, 1.0,
+            help="Caps amplification in quiet zones so deep noise is not over-boosted and "
+                 "quiet shallow zones are not blown to white.")
     
     elif gain_type == "Spherical":
         power_gain = st.slider("Power Gain", 1.0, 3.0, 2.0, 0.1)
@@ -1030,18 +1039,36 @@ def apply_gain(array, gain_type, **kwargs):
         return array * gain_vector[:, np.newaxis]
     
     elif gain_type == "AGC (Automatic Gain Control)":
-        window = kwargs.get('window_size', 100)
-        target = kwargs.get('target_amplitude', 0.3)
-        
-        # Vectorized sliding-window RMS along the time axis (axis=0)
-        from scipy.ndimage import uniform_filter1d
+        window = int(kwargs.get('window_size', 100) or 100)
+        target = float(kwargs.get('target_amplitude', 0.3) or 0.3)
+        method = kwargs.get('agc_method', 'Robust (median)') or 'Robust (median)'
+        max_gain = float(kwargs.get('agc_max_gain', 20.0) or 20.0)
+
+        from scipy.ndimage import uniform_filter1d, median_filter
         arr = array.astype(np.float64)
-        mean_sq = uniform_filter1d(arr**2, size=window, axis=0, mode='nearest')
-        rms = np.sqrt(mean_sq)
         eps = np.finfo(np.float64).eps
-        result = np.where(rms > eps, arr * (target / np.maximum(rms, eps)), arr)
-        
-        return result
+
+        if str(method).startswith('Robust'):
+            # Sliding-window median of |amp|: insensitive to isolated strong events,
+            # so the strong direct/first-arrival wave does NOT suppress its neighbours.
+            level = median_filter(np.abs(arr), size=(window, 1), mode='nearest')
+            # median(|x|) ~ 0.6745 * sigma for Gaussian; rescale to an RMS-equivalent
+            level = level / 0.6745
+            global_level = np.median(np.abs(arr)) / 0.6745
+        else:
+            # Classic RMS AGC
+            level = np.sqrt(uniform_filter1d(arr**2, size=window, axis=0, mode='nearest'))
+            global_level = np.sqrt(np.mean(arr**2))
+
+        global_level = global_level if global_level > eps else 1.0
+        # Floor stabilises quiet zones (prevents divide-by-tiny -> over-boost -> white)
+        level_floor = 0.05 * global_level
+        level = np.maximum(level, level_floor)
+
+        gain = target / level
+        # Cap gain so neither deep noise nor quiet patches are blown out
+        gain = np.clip(gain, 0.0, max_gain * (target / global_level))
+        return arr * gain
     
     elif gain_type == "Spherical":
         power = kwargs.get('power_gain', 2.0)
@@ -2034,6 +2061,8 @@ if dzt_file and process_btn:
                                                 exp_factor=exp_factor if 'exp_factor' in locals() else None,
                                                 window_size=window_size if 'window_size' in locals() else None,
                                                 target_amplitude=target_amplitude if 'target_amplitude' in locals() else None,
+                                                agc_method=agc_method if 'agc_method' in locals() else None,
+                                                agc_max_gain=agc_max_gain if 'agc_max_gain' in locals() else None,
                                                 power_gain=power_gain if 'power_gain' in locals() else None,
                                                 attenuation=attenuation if 'attenuation' in locals() else None)
                     
