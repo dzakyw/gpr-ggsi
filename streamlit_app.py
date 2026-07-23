@@ -2922,12 +2922,12 @@ if st.session_state.data_loaded:
             # Determine which array to show
             display_data = None
             data_label = ""
-            default_cmap = "seismic"
+            default_cmap = "gray"
             
             if data_type == "Raw GPR":
                 display_data = st.session_state.processed_array
                 data_label = "GPR Section"
-                default_cmap = "seismic"
+                default_cmap = "gray"
             
             elif data_type == "Attribute":
                 if "gpr_attributes" not in st.session_state:
@@ -2981,7 +2981,7 @@ if st.session_state.data_loaded:
                 use_log = False
                 norm = None
                 cbar_label = "Amplitude"
-                force_cmap = 'seismic'
+                force_cmap = 'gray'
             else:
                 # For Attribute or Resistivity, use their own data ranges
                 if np.any(display_data < 0):
