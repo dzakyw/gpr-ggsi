@@ -661,20 +661,35 @@ with st.sidebar:
             help="Stolt: fast, constant velocity, best for gently dipping data. "
                  "Kirchhoff: slower but handles steep dips and lets you limit the aperture."
         )
-        mig_vel_factor = st.slider(
-            "Velocity factor", 0.5, 2.0, 1.0, 0.05,
-            help="1.0 assumes the velocity already used for the depth axis is correct. "
-                 "<1 = under-migrate (hyperbolas remain: velocity too low). "
-                 ">1 = over-migrate (smiles appear: velocity too high)."
+        mig_auto_vel = st.checkbox(
+            "Auto-pick velocity factor (focusing scan)", False,
+            help="Migrates with a range of factors and keeps the one that focuses the "
+                 "image best (varimax norm). Slower, but removes the guesswork."
         )
+        mig_vel_factor = st.slider(
+            "Velocity factor", 0.2, 5.0, 1.0, 0.05,
+            help="Controls how WIDE a hyperbola gets collapsed - it does NOT move the "
+                 "apex depth. Hyperbolas still open = increase it. "
+                 "Smiles / frowns appear = decrease it."
+        )
+        mig_max_angle = st.slider("Max dip angle (deg)", 10.0, 85.0, 60.0, 5.0,
+            help="Steep dips carry both the diffraction flanks and the aliased noise. "
+                 "Lowering this cleans up the criss-cross pattern at a small cost in "
+                 "flank collapse (tested: 85 deg -> 80.8%, 45 deg -> 78.8% focus).")
         if migration_method == "Kirchhoff":
             mig_aperture = st.slider("Aperture (m)", 1.0, 100.0, 10.0, 1.0,
                 help="Half-width of the summation window. Roughly 1-2x the target depth.")
-            mig_max_angle = st.slider("Max dip angle (deg)", 10.0, 85.0, 60.0, 5.0,
-                help="Limits steep-dip noise. Lower = cleaner but loses steep reflectors.")
         else:
             mig_taper = st.slider("Edge taper", 0.02, 0.3, 0.1, 0.01,
                 help="Cosine taper to suppress FFT wrap-around artefacts at the edges.")
+
+        mig_gain_after = st.checkbox(
+            "Migrate BEFORE gain (noise-heavy data only)", False,
+            help="Default OFF. Gain applied BEFORE migration boosts the weak far-offset "
+                 "hyperbola flanks so they can contribute to the collapse - testing shows "
+                 "this focuses far better. Turn this ON only if migration is amplifying "
+                 "noise more than it is collapsing diffractions."
+        )
 
     freq_filter = st.checkbox("Apply Frequency Filter", False)
     if freq_filter:
@@ -1121,10 +1136,15 @@ def apply_migration(array, method="Stolt (f-k)", dx=1.0, dz=1.0, vel_factor=1.0,
     """
     Post-stack (exploding-reflector) migration for a depth-axis GPR section.
 
-    The vertical axis of this app is already depth (z = v*t/2), so in the depth
-    domain a point diffractor at (x0, z0) maps to z = sqrt(z0^2 + (x-x0)^2).
-    That geometry needs no explicit velocity; `vel_factor` scales it so the user
-    can tune over/under-migration (>1 = migrate harder, <1 = softer).
+    The vertical axis of this app is depth built with some assumed velocity v0.
+    If the true velocity is v, then with s = v / v0 a point diffractor at
+    (x0, z0) appears on this axis as
+
+        z_data = sqrt( z0^2 + ((x - x0) / s)^2 )
+
+    Note the apex depth z0 is UNCHANGED by s; only the hyperbola WIDTH changes.
+    `vel_factor` is exactly that s: larger s = wider/flatter hyperbolas are
+    collapsed. s = 1 means the depth-axis velocity is already correct.
 
     array : 2D (n_samples, n_traces), depth increasing downward
     dx    : trace spacing (same unit as dz)
@@ -1166,12 +1186,26 @@ def apply_migration(array, method="Stolt (f-k)", dx=1.0, dz=1.0, vel_factor=1.0,
         KZ, KX = np.meshgrid(kz, kx, indexing='ij')
 
         # Stolt mapping (depth domain): for each OUTPUT kz, read the data at
-        # kz_data = sign(kz) * sqrt(kz^2 + kx^2) / vf
-        kz_data = np.sign(KZ) * np.sqrt(KZ ** 2 + KX ** 2) / vf
-        # Jacobian of the stretch: |kz| / sqrt(kz^2 + kx^2)
-        denom = np.sqrt(KZ ** 2 + KX ** 2)
+        #   kz_data = sign(kz) * sqrt(kz^2 + (vf*kx)^2)
+        # At kx = 0 this gives kz_data = kz, so the APEX DEPTH IS PRESERVED and
+        # vf only controls how wide a hyperbola gets collapsed.
+        denom = np.sqrt(KZ ** 2 + (vf * KX) ** 2)
+        kz_data = np.sign(KZ) * denom
         with np.errstate(divide='ignore', invalid='ignore'):
             jac = np.where(denom > 0, np.abs(KZ) / np.maximum(denom, 1e-12), 0.0)
+
+        # --- Dip limiting: sin(theta) = |vf*kx| / |kz_data| ---
+        # Steep dips are where aliased noise lives; migrating them smears random
+        # noise into criss-cross "smiles". Taper them off smoothly.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            sin_th = np.where(denom > 0, np.abs(vf * KX) / np.maximum(denom, 1e-12), 1.0)
+        s_max = np.sin(np.deg2rad(float(np.clip(max_angle_deg, 5.0, 89.0))))
+        s_lo = s_max * 0.85                      # start of the cosine roll-off
+        dip_w = np.ones_like(sin_th)
+        roll = (sin_th > s_lo) & (sin_th < s_max)
+        dip_w[roll] = 0.5 * (1 + np.cos(np.pi * (sin_th[roll] - s_lo) / (s_max - s_lo)))
+        dip_w[sin_th >= s_max] = 0.0
+        jac = jac * dip_w
 
         kz_nyq = np.pi / dz
         out = np.zeros_like(D)
@@ -1207,9 +1241,9 @@ def apply_migration(array, method="Stolt (f-k)", dx=1.0, dz=1.0, vel_factor=1.0,
         xoff = offsets * dx
 
         for io, ix in enumerate(offsets):
-            # Travel path in depth domain for this lateral offset
-            # z_data = sqrt(z_out^2 + xoff^2) / vf
-            zd = np.sqrt(z[:, None] ** 2 + xoff[io] ** 2) / vf
+            # Travel path in depth domain for this lateral offset:
+            #   z_data = sqrt(z_out^2 + (xoff / vf)^2)   -> apex depth preserved
+            zd = np.sqrt(z[:, None] ** 2 + (xoff[io] / vf) ** 2)
             samp = zd[:, 0] / dz
             inside = samp <= (n_samples - 1)
             if not np.any(inside):
@@ -1217,7 +1251,7 @@ def apply_migration(array, method="Stolt (f-k)", dx=1.0, dz=1.0, vel_factor=1.0,
 
             # Aperture angle limit (obliquity)
             with np.errstate(divide='ignore', invalid='ignore'):
-                cos_th = np.where(zd[:, 0] > 0, z / np.maximum(zd[:, 0] * vf, 1e-12), 1.0)
+                cos_th = np.where(zd[:, 0] > 0, z / np.maximum(zd[:, 0], 1e-12), 1.0)
             ang_ok = cos_th >= np.cos(max_angle)
             use = inside & ang_ok
             if not np.any(use):
@@ -1243,6 +1277,46 @@ def apply_migration(array, method="Stolt (f-k)", dx=1.0, dz=1.0, vel_factor=1.0,
         # Normalise by aperture count so amplitudes stay comparable
         mig /= max(1.0, float(len(offsets)))
         return mig
+
+
+def scan_migration_velocity(array, dx=1.0, dz=1.0, factors=None,
+                            method="Stolt (f-k)", max_traces=384):
+    """
+    Migration-velocity analysis by image focusing.
+
+    Migrates the section with a range of velocity factors and scores each result
+    with the varimax norm  N * sum(a^4) / (sum(a^2))^2 . A focused image (energy
+    concentrated in few samples) scores high; a smeared or over-migrated one
+    scores low. Returns (list_of_(factor, score), best_factor).
+    """
+    arr = np.asarray(array, dtype=np.float64)
+    if factors is None:
+        factors = np.arange(0.3, 3.01, 0.1)
+
+    # Crop laterally only - depth origin must be preserved for migration
+    n_s, n_t = arr.shape
+    if n_t > max_traces:
+        c0 = (n_t - max_traces) // 2
+        work = arr[:, c0:c0 + max_traces]
+    else:
+        work = arr
+
+    results = []
+    for f in factors:
+        try:
+            mig = apply_migration(work, method=method, dx=dx, dz=dz, vel_factor=float(f),
+                                  aperture_m=None, max_angle_deg=65.0)
+            e2 = np.sum(mig ** 2)
+            if e2 <= 0:
+                results.append((float(f), 0.0))
+                continue
+            score = mig.size * np.sum(mig ** 4) / (e2 ** 2)
+            results.append((float(f), float(score)))
+        except Exception:
+            results.append((float(f), 0.0))
+
+    best = max(results, key=lambda r: r[1])[0] if results else 1.0
+    return results, best
 
 
 def apply_near_surface_correction(array, correction_type, correction_depth, max_depth, **kwargs):
@@ -2214,6 +2288,9 @@ if dzt_file and process_btn:
                         st.session_state.deconvolution_applied = False
                         processed_array = original_array.copy()
                     
+                    # Keep a pre-gain copy so migration can run before gain (cleaner)
+                    pre_gain_array = processed_array.copy()
+
                     # Apply time-varying gain
                     processed_array = apply_gain(processed_array, gain_type, 
                                                 const_gain=const_gain if 'const_gain' in locals() else None,
@@ -2302,23 +2379,64 @@ if dzt_file and process_btn:
                             else:
                                 dx_mig = dz_mig  # fall back to square cells
 
+                            # Migrate the pre-gain data when requested: AGC-boosted
+                            # noise otherwise gets smeared into criss-cross artefacts.
+                            migrate_pre_gain = ('mig_gain_after' in locals()
+                                                and mig_gain_after
+                                                and 'pre_gain_array' in locals())
+                            mig_input = pre_gain_array if migrate_pre_gain else processed_array
+
+                            vel_used = mig_vel_factor
+                            if 'mig_auto_vel' in locals() and mig_auto_vel:
+                                with st.spinner("Scanning velocity factors for best focus..."):
+                                    scan_res, best_vf = scan_migration_velocity(
+                                        mig_input, dx=dx_mig, dz=dz_mig,
+                                        method=migration_method)
+                                vel_used = best_vf
+                                st.session_state.migration_scan = scan_res
+                                if best_vf >= 2.95 or best_vf <= 0.35:
+                                    st.warning(
+                                        f"Best factor {best_vf:.2f} sits at the edge of the "
+                                        "scan range - your Max Depth setting is probably "
+                                        "inconsistent with the true GPR velocity.")
+                                st.info(f"Focusing scan: best velocity factor = {best_vf:.2f}")
+
                             st.info(f"Applying {migration_method} migration "
                                     f"(dx={dx_mig:.3f}, dz={dz_mig:.3f})...")
                             migrated_array = apply_migration(
-                                processed_array,
+                                mig_input,
                                 method=migration_method,
                                 dx=dx_mig, dz=dz_mig,
-                                vel_factor=mig_vel_factor,
+                                vel_factor=vel_used,
                                 aperture_m=mig_aperture if 'mig_aperture' in locals() else None,
-                                max_angle_deg=mig_max_angle if 'mig_max_angle' in locals() else 60.0,
+                                max_angle_deg=mig_max_angle if 'mig_max_angle' in locals() else 45.0,
                                 taper_frac=mig_taper if 'mig_taper' in locals() else 0.1
                             )
+                            # Re-apply the same gain to the migrated section so it is
+                            # displayed on comparable footing with the unmigrated panel
+                            if migrate_pre_gain:
+                                migrated_array = apply_gain(
+                                    migrated_array, gain_type,
+                                    const_gain=const_gain if 'const_gain' in locals() else None,
+                                    min_gain=min_gain if 'min_gain' in locals() else None,
+                                    max_gain=max_gain if 'max_gain' in locals() else None,
+                                    base_gain=base_gain if 'base_gain' in locals() else None,
+                                    exp_factor=exp_factor if 'exp_factor' in locals() else None,
+                                    window_size=window_size if 'window_size' in locals() else None,
+                                    target_amplitude=target_amplitude if 'target_amplitude' in locals() else None,
+                                    agc_method=agc_method if 'agc_method' in locals() else None,
+                                    agc_max_gain=agc_max_gain if 'agc_max_gain' in locals() else None,
+                                    power_gain=power_gain if 'power_gain' in locals() else None,
+                                    attenuation=attenuation if 'attenuation' in locals() else None)
+
                             st.session_state.migrated_array = migrated_array
                             st.session_state.migration_applied = True
                             st.session_state.migration_params = {
                                 'method': migration_method,
-                                'vel_factor': mig_vel_factor,
-                                'dx': dx_mig, 'dz': dz_mig
+                                'vel_factor': vel_used,
+                                'dx': dx_mig, 'dz': dz_mig,
+                                'max_angle': mig_max_angle if 'mig_max_angle' in locals() else 45.0,
+                                'pre_gain': bool(migrate_pre_gain)
                             }
                             st.success(f"✓ {migration_method} migration applied")
                         except Exception as e:
@@ -3336,8 +3454,23 @@ if st.session_state.data_loaded:
                 if mig_data.shape == display_data.shape:
                     mp = st.session_state.get('migration_params', {})
                     st.markdown("---")
-                    st.markdown(f"**Migrated section** — {mp.get('method', 'Migration')} "
-                                f"(velocity factor {mp.get('vel_factor', 1.0):.2f})")
+                    st.markdown(
+                        f"**Migrated section** — {mp.get('method', 'Migration')} · "
+                        f"velocity factor {mp.get('vel_factor', 1.0):.2f} · "
+                        f"dip limit {mp.get('max_angle', 60.0):.0f}° · "
+                        f"{'migrated before gain' if mp.get('pre_gain') else 'migrated after gain'}")
+
+                    # Focusing-scan curve: lets you judge whether the factor is well picked
+                    if st.session_state.get('migration_scan'):
+                        with st.expander("Velocity focusing scan"):
+                            import pandas as pd
+                            scan_df = pd.DataFrame(st.session_state.migration_scan,
+                                                   columns=["velocity_factor", "focus_score"])
+                            scan_df = scan_df.set_index("velocity_factor")
+                            st.line_chart(scan_df)
+                            st.caption("A clear single peak means the factor is well "
+                                       "constrained. A flat curve means diffractions are too "
+                                       "weak or too noisy to pick a velocity from.")
 
                     # Migration changes amplitude balance, so scale to its own values
                     vmax_mig = np.percentile(np.abs(mig_data), 99)
