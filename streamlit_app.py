@@ -106,6 +106,10 @@ if 'processed_array' not in st.session_state:
     st.session_state.processed_array = None
 if 'deconvolved_array' not in st.session_state:
     st.session_state.deconvolved_array = None
+if 'migrated_array' not in st.session_state:
+    st.session_state.migrated_array = None
+if 'migration_applied' not in st.session_state:
+    st.session_state.migration_applied = False
 if 'coordinates' not in st.session_state:
     st.session_state.coordinates = None
 if 'interpolated_coords' not in st.session_state:
@@ -643,6 +647,35 @@ with st.sidebar:
         if bgr_type == "Boxcar":
             bgr_window = st.slider("Boxcar Window", 10, 500, 100)
     
+    # ========== MIGRATION ==========
+    st.markdown("---")
+    st.header("🌀 Migration")
+    apply_migration_flag = st.checkbox(
+        "Apply Migration", False,
+        help="Collapses diffraction hyperbolas back to their true positions and "
+             "repositions dipping reflectors."
+    )
+    if apply_migration_flag:
+        migration_method = st.selectbox(
+            "Migration Method", ["Stolt (f-k)", "Kirchhoff"],
+            help="Stolt: fast, constant velocity, best for gently dipping data. "
+                 "Kirchhoff: slower but handles steep dips and lets you limit the aperture."
+        )
+        mig_vel_factor = st.slider(
+            "Velocity factor", 0.5, 2.0, 1.0, 0.05,
+            help="1.0 assumes the velocity already used for the depth axis is correct. "
+                 "<1 = under-migrate (hyperbolas remain: velocity too low). "
+                 ">1 = over-migrate (smiles appear: velocity too high)."
+        )
+        if migration_method == "Kirchhoff":
+            mig_aperture = st.slider("Aperture (m)", 1.0, 100.0, 10.0, 1.0,
+                help="Half-width of the summation window. Roughly 1-2x the target depth.")
+            mig_max_angle = st.slider("Max dip angle (deg)", 10.0, 85.0, 60.0, 5.0,
+                help="Limits steep-dip noise. Lower = cleaner but loses steep reflectors.")
+        else:
+            mig_taper = st.slider("Edge taper", 0.02, 0.3, 0.1, 0.01,
+                help="Cosine taper to suppress FFT wrap-around artefacts at the edges.")
+
     freq_filter = st.checkbox("Apply Frequency Filter", False)
     if freq_filter:
         col1, col2 = st.columns(2)
@@ -1082,6 +1115,135 @@ def apply_gain(array, gain_type, **kwargs):
         return array * gain_vector
     
     return array
+
+def apply_migration(array, method="Stolt (f-k)", dx=1.0, dz=1.0, vel_factor=1.0,
+                    aperture_m=None, max_angle_deg=60.0, taper_frac=0.1):
+    """
+    Post-stack (exploding-reflector) migration for a depth-axis GPR section.
+
+    The vertical axis of this app is already depth (z = v*t/2), so in the depth
+    domain a point diffractor at (x0, z0) maps to z = sqrt(z0^2 + (x-x0)^2).
+    That geometry needs no explicit velocity; `vel_factor` scales it so the user
+    can tune over/under-migration (>1 = migrate harder, <1 = softer).
+
+    array : 2D (n_samples, n_traces), depth increasing downward
+    dx    : trace spacing (same unit as dz)
+    dz    : depth sample interval
+    """
+    arr = np.asarray(array, dtype=np.float64)
+    n_samples, n_traces = arr.shape
+    if n_samples < 8 or n_traces < 8:
+        return arr.copy()
+
+    dx = float(dx) if dx and dx > 0 else 1.0
+    dz = float(dz) if dz and dz > 0 else 1.0
+    vf = float(vel_factor) if vel_factor and vel_factor > 0 else 1.0
+
+    if str(method).startswith("Stolt"):
+        # ---- Stolt (f-k) migration ----
+        # Cosine taper on both axes to suppress wrap-around/edge artefacts
+        def _taper(n, frac):
+            w = np.ones(n)
+            m = max(1, int(n * frac))
+            ramp = 0.5 * (1 - np.cos(np.pi * np.arange(m) / m))
+            w[:m] = ramp
+            w[n - m:] = ramp[::-1]
+            return w
+
+        tap = np.outer(_taper(n_samples, taper_frac), _taper(n_traces, taper_frac))
+        work = arr * tap
+
+        # Pad to reduce circular-convolution wrap.
+        # IMPORTANT: migration is NOT shift-invariant in depth, so the z=0 origin
+        # must be preserved -> pad the BOTTOM only. Lateral padding is symmetric.
+        pz, px = n_samples // 2, n_traces // 2
+        work = np.pad(work, ((0, pz), (px, px)), mode='constant')
+        nz, nx = work.shape
+
+        D = np.fft.fft2(work)
+        kz = 2 * np.pi * np.fft.fftfreq(nz, d=dz)   # vertical wavenumber (data)
+        kx = 2 * np.pi * np.fft.fftfreq(nx, d=dx)   # horizontal wavenumber
+        KZ, KX = np.meshgrid(kz, kx, indexing='ij')
+
+        # Stolt mapping (depth domain): for each OUTPUT kz, read the data at
+        # kz_data = sign(kz) * sqrt(kz^2 + kx^2) / vf
+        kz_data = np.sign(KZ) * np.sqrt(KZ ** 2 + KX ** 2) / vf
+        # Jacobian of the stretch: |kz| / sqrt(kz^2 + kx^2)
+        denom = np.sqrt(KZ ** 2 + KX ** 2)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            jac = np.where(denom > 0, np.abs(KZ) / np.maximum(denom, 1e-12), 0.0)
+
+        kz_nyq = np.pi / dz
+        out = np.zeros_like(D)
+        kz_sorted_idx = np.argsort(kz)
+        kz_sorted = kz[kz_sorted_idx]
+        for j in range(nx):
+            target = kz_data[:, j]
+            valid = np.abs(target) <= kz_nyq          # beyond Nyquist -> no data
+            if not np.any(valid):
+                continue
+            col = D[kz_sorted_idx, j]
+            re = np.interp(target[valid], kz_sorted, col.real, left=0.0, right=0.0)
+            im = np.interp(target[valid], kz_sorted, col.imag, left=0.0, right=0.0)
+            out[valid, j] = (re + 1j * im) * jac[valid, j]
+
+        mig = np.real(np.fft.ifft2(out))
+        mig = mig[:n_samples, px:px + n_traces]
+        return mig
+
+    else:
+        # ---- Kirchhoff (diffraction-summation) migration ----
+        z = np.arange(n_samples) * dz
+        # Aperture in traces
+        if aperture_m is None or aperture_m <= 0:
+            half_ap = n_traces // 4
+        else:
+            half_ap = int(round(aperture_m / dx))
+        half_ap = int(np.clip(half_ap, 1, n_traces - 1))
+
+        max_angle = np.deg2rad(float(max_angle_deg))
+        mig = np.zeros_like(arr)
+        offsets = np.arange(-half_ap, half_ap + 1)
+        xoff = offsets * dx
+
+        for io, ix in enumerate(offsets):
+            # Travel path in depth domain for this lateral offset
+            # z_data = sqrt(z_out^2 + xoff^2) / vf
+            zd = np.sqrt(z[:, None] ** 2 + xoff[io] ** 2) / vf
+            samp = zd[:, 0] / dz
+            inside = samp <= (n_samples - 1)
+            if not np.any(inside):
+                continue
+
+            # Aperture angle limit (obliquity)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                cos_th = np.where(zd[:, 0] > 0, z / np.maximum(zd[:, 0] * vf, 1e-12), 1.0)
+            ang_ok = cos_th >= np.cos(max_angle)
+            use = inside & ang_ok
+            if not np.any(use):
+                continue
+
+            i0 = np.floor(samp[use]).astype(int)
+            frac = samp[use] - i0
+            i1 = np.minimum(i0 + 1, n_samples - 1)
+
+            # Source traces shifted by ix (contribution goes from trace j+ix to j)
+            src_lo = max(0, -ix)
+            src_hi = min(n_traces, n_traces - ix)
+            if src_hi <= src_lo:
+                continue
+
+            block = (arr[i0][:, src_lo + ix:src_hi + ix] * (1 - frac)[:, None] +
+                     arr[i1][:, src_lo + ix:src_hi + ix] * frac[:, None])
+            # Obliquity weight
+            w = cos_th[use][:, None]
+            rows = np.where(use)[0]
+            mig[np.ix_(rows, np.arange(src_lo, src_hi))] += block * w
+
+        # Normalise by aperture count so amplitudes stay comparable
+        mig /= max(1.0, float(len(offsets)))
+        return mig
+
 
 def apply_near_surface_correction(array, correction_type, correction_depth, max_depth, **kwargs):
     """Apply near-surface amplitude correction to reduce high amplitudes in shallow region"""
@@ -2125,6 +2287,48 @@ if dzt_file and process_btn:
                             st.session_state.distance_min = distance_min if 'distance_min' in locals() else 0
                             st.session_state.distance_max = distance_max if 'distance_max' in locals() else total_distance
                     
+                    # ========== MIGRATION ==========
+                    if apply_migration_flag:
+                        try:
+                            n_s, n_t = processed_array.shape
+                            # Depth sample interval (dz) in the same unit as the axis
+                            if depth_unit != "samples" and max_depth:
+                                dz_mig = float(max_depth) / max(1, n_s - 1)
+                            else:
+                                dz_mig = 1.0
+                            # Trace spacing (dx): prefer real coordinates
+                            if st.session_state.total_distance:
+                                dx_mig = float(st.session_state.total_distance) / max(1, n_t - 1)
+                            else:
+                                dx_mig = dz_mig  # fall back to square cells
+
+                            st.info(f"Applying {migration_method} migration "
+                                    f"(dx={dx_mig:.3f}, dz={dz_mig:.3f})...")
+                            migrated_array = apply_migration(
+                                processed_array,
+                                method=migration_method,
+                                dx=dx_mig, dz=dz_mig,
+                                vel_factor=mig_vel_factor,
+                                aperture_m=mig_aperture if 'mig_aperture' in locals() else None,
+                                max_angle_deg=mig_max_angle if 'mig_max_angle' in locals() else 60.0,
+                                taper_frac=mig_taper if 'mig_taper' in locals() else 0.1
+                            )
+                            st.session_state.migrated_array = migrated_array
+                            st.session_state.migration_applied = True
+                            st.session_state.migration_params = {
+                                'method': migration_method,
+                                'vel_factor': mig_vel_factor,
+                                'dx': dx_mig, 'dz': dz_mig
+                            }
+                            st.success(f"✓ {migration_method} migration applied")
+                        except Exception as e:
+                            st.session_state.migration_applied = False
+                            st.session_state.migrated_array = None
+                            st.warning(f"Migration failed: {e}")
+                    else:
+                        st.session_state.migration_applied = False
+                        st.session_state.migrated_array = None
+
                     # Store multiple windows
                     st.session_state.multiple_windows = multiple_windows
                     if multiple_windows and use_custom_window and 'windows' in locals():
@@ -2922,12 +3126,12 @@ if st.session_state.data_loaded:
             # Determine which array to show
             display_data = None
             data_label = ""
-            default_cmap = "gray"
+            default_cmap = "seismic"
             
             if data_type == "Raw GPR":
                 display_data = st.session_state.processed_array
                 data_label = "GPR Section"
-                default_cmap = "gray"
+                default_cmap = "seismic"
             
             elif data_type == "Attribute":
                 if "gpr_attributes" not in st.session_state:
@@ -2981,7 +3185,7 @@ if st.session_state.data_loaded:
                 use_log = False
                 norm = None
                 cbar_label = "Amplitude"
-                force_cmap = 'gray'
+                force_cmap = 'seismic'
             else:
                 # For Attribute or Resistivity, use their own data ranges
                 if np.any(display_data < 0):
@@ -3122,6 +3326,108 @@ if st.session_state.data_loaded:
             ax_elev.set_ylim(Y_elev.min(), st.session_state.interpolated_coords['elevation'].max() + 5)
             st.pyplot(fig_elev)
             plt.close(fig_elev)
+
+            # ================= MIGRATED SECTION (plotted below the unmigrated) =================
+            if (data_type == "Raw GPR"
+                    and st.session_state.get('migration_applied', False)
+                    and st.session_state.get('migrated_array', None) is not None):
+
+                mig_data = st.session_state.migrated_array
+                if mig_data.shape == display_data.shape:
+                    mp = st.session_state.get('migration_params', {})
+                    st.markdown("---")
+                    st.markdown(f"**Migrated section** — {mp.get('method', 'Migration')} "
+                                f"(velocity factor {mp.get('vel_factor', 1.0):.2f})")
+
+                    # Migration changes amplitude balance, so scale to its own values
+                    vmax_mig = np.percentile(np.abs(mig_data), 99)
+                    vmax_mig = vmax_mig if vmax_mig > 0 else 1.0
+
+                    fig_mig, ax_mig = plt.subplots(figsize=(base_w, fig_h),
+                                                   constrained_layout=True)
+                    mesh_mig = ax_mig.pcolormesh(X, Y_elev, mig_data, cmap=force_cmap,
+                                                 shading='auto', alpha=1.0,
+                                                 vmin=-vmax_mig, vmax=vmax_mig)
+                    ax_mig.set_aspect(aspect_ratio, adjustable='box')
+                    ax_mig.set_xlabel('Distance along profile (m)')
+                    ax_mig.set_ylabel('Elevation (m)')
+                    ax_mig.set_title(f"{data_label} – Migrated ({mp.get('method', '')}) "
+                                     f"– Topographic profile")
+                    ax_mig.grid(True, alpha=0.2)
+                    fig_mig.colorbar(mesh_mig, ax=ax_mig, label=cbar_label,
+                                     fraction=0.025, pad=0.02, aspect=30)
+
+                    # Same topographic surface drape as the panel above
+                    ax_mig.plot(st.session_state.interpolated_coords['distance'],
+                                st.session_state.interpolated_coords['elevation'],
+                                'k-', linewidth=1, alpha=0.8, label='Surface')
+                    ax_mig.fill_between(st.session_state.interpolated_coords['distance'],
+                                        Y_elev.min(),
+                                        st.session_state.interpolated_coords['elevation'],
+                                        alpha=0.1, color='gray')
+
+                    # Same pole markers
+                    if pole_data is not None:
+                        from scipy.interpolate import interp1d
+                        elev_interp_m = interp1d(
+                            st.session_state.interpolated_coords['distance'],
+                            st.session_state.interpolated_coords['elevation'],
+                            kind='linear', fill_value='extrapolate')
+                        for i in range(len(pole_data['projected_distances'])):
+                            pole_elev = elev_interp_m(pole_data['projected_distances'][i])
+                            if 'TS' in str(pole_data['names'][i]):
+                                color, marker = 'red', '^'
+                            elif 'TL' in str(pole_data['names'][i]):
+                                color, marker = 'purple', '^'
+                            else:
+                                color, marker = 'orange', 'o'
+                            ax_mig.scatter(pole_data['projected_distances'][i], pole_elev + 0.5,
+                                           c=color, marker=marker, s=100, alpha=0.9, zorder=10)
+                            ax_mig.text(pole_data['projected_distances'][i], pole_elev + 1,
+                                        pole_data['names'][i], fontsize=6, ha='center')
+
+                    ax_mig.set_ylim(Y_elev.min(),
+                                    st.session_state.interpolated_coords['elevation'].max() + 5)
+                    st.pyplot(fig_mig)
+                    plt.close(fig_mig)
+
+                    # High-resolution export of the migrated panel
+                    if st.button("📸 Save migrated view as high-resolution file",
+                                 key="export_migrated_coord"):
+                        import io
+                        fig_mx, ax_mx = plt.subplots(figsize=(base_w, fig_h), dpi=export_dpi,
+                                                     constrained_layout=True)
+                        mesh_mx = ax_mx.pcolormesh(X, Y_elev, mig_data, cmap=force_cmap,
+                                                   shading='auto', vmin=-vmax_mig, vmax=vmax_mig)
+                        ax_mx.set_aspect(aspect_ratio, adjustable='box')
+                        ax_mx.set_xlabel('Distance along profile (m)')
+                        ax_mx.set_ylabel('Elevation (m)')
+                        ax_mx.set_title(f"{data_label} – Migrated ({mp.get('method', '')})")
+                        ax_mx.grid(True, alpha=0.2)
+                        fig_mx.colorbar(mesh_mx, ax=ax_mx, label=cbar_label,
+                                        fraction=0.025, pad=0.02, aspect=30)
+                        ax_mx.plot(st.session_state.interpolated_coords['distance'],
+                                   st.session_state.interpolated_coords['elevation'],
+                                   'k-', linewidth=1, alpha=0.8)
+                        ax_mx.set_ylim(Y_elev.min(),
+                                       st.session_state.interpolated_coords['elevation'].max() + 5)
+                        buf = io.BytesIO()
+                        fmt = export_format.lower()
+                        fig_mx.savefig(buf, format=fmt,
+                                       dpi=export_dpi if fmt == 'png' else None,
+                                       bbox_inches='tight')
+                        plt.close(fig_mx)
+                        buf.seek(0)
+                        mime_map = {'png': 'image/png', 'pdf': 'application/pdf',
+                                    'svg': 'image/svg+xml'}
+                        st.download_button(f"⬇️ Download migrated {export_format}",
+                                           data=buf,
+                                           file_name=f"gpr_migrated_topographic.{fmt}",
+                                           mime=mime_map.get(fmt, 'image/png'),
+                                           key="dl_migrated_coord")
+                else:
+                    st.warning("Migrated array shape does not match the display data - "
+                               "please re-run Process Data.")
 
             # ========== HIGH-RESOLUTION EXPORT BUTTON ==========
             if st.button("📷 Save current view as high‑resolution file", key="export_coord"):
